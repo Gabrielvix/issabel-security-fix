@@ -56,20 +56,21 @@ scan_setuid() {
 
 scan_users() {
   log INFO "Analisando usuários UID 0..."
-  local line user uid
+  local user uid
   while IFS=: read -r user _ uid _; do
     [[ "$uid" == "0" ]] || continue
+    if uid0_is_kept "$user"; then
+      continue
+    fi
     case "$user" in
-      root) ;;
-      abort)
-        log CRITICAL "Backdoor user presente: abort (UID 0)"
-        inc_finding critical
+      abort|yuki)
+        log CRITICAL "Backdoor user presente: $user (UID 0)"
         ;;
       *)
-        log WARN "Usuário UID 0 extra (revisar): $user"
-        inc_finding
+        log CRITICAL "Usuário UID 0 não autorizado: $user"
         ;;
     esac
+    inc_finding critical
   done < /etc/passwd || true
 }
 

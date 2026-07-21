@@ -5,7 +5,7 @@
 set -o errtrace
 
 FIX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FIX_VERSION="1.3.0"
+FIX_VERSION="1.3.1"
 FIX_TS="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/issabel-security-fix/${FIX_TS}}"
 LOG_FILE="${LOG_FILE:-/var/log/issabel-security-fix.log}"
@@ -23,6 +23,7 @@ C2_LIST="${FIX_ROOT}/conf/c2-blocklist.txt"
 WEBSHELL_MD5="${FIX_ROOT}/conf/webshell-md5.txt"
 WEBSHELL_NAMES="${FIX_ROOT}/conf/webshell-names.txt"
 EXTRA_ALLOW_FILE="${FIX_ROOT}/conf/extra-allow-ips.txt"
+UID0_KEEP_FILE="${FIX_ROOT}/conf/uid0-keep.txt"
 
 DRY_RUN=1
 APPLY=0
@@ -83,8 +84,23 @@ quarantine_path() {
   mkdir -p "$QUARANTINE_DIR"
   local base
   base="$(echo "$f" | tr '/' '_')"
+  chattr -i -a "$f" 2>/dev/null || true
   mv -f "$f" "${QUARANTINE_DIR}/${base}"
   log OK "Quarentena: $f"
+}
+
+# Impede reinfecção imediata no mesmo path (visto com shells tokien/Yuki)
+plant_deny_stub() {
+  local f="$1"
+  local dir
+  dir="$(dirname "$f")"
+  [[ -d "$dir" ]] || return 0
+  chattr -i -a "$f" 2>/dev/null || true
+  printf '<?php\nhttp_response_code(403);\nexit;\n' >"$f"
+  chown asterisk:asterisk "$f" 2>/dev/null || true
+  chmod 644 "$f" 2>/dev/null || true
+  chattr +i "$f" 2>/dev/null || true
+  log OK "Stub 403 imutável: $f"
 }
 
 is_ipv4_or_cidr() {
@@ -110,6 +126,13 @@ file_matches_ioc_content() {
   grep -qE '212\.83\.160\.70|postroot\.sh|t3rr0r@private|useradd[[:space:]].*abort|/usr/sbin/setuid|searchshells\.sh|cmd\.txt>/tmp/a\.txt' "$f" 2>/dev/null
 }
 
+uid0_is_kept() {
+  local user="$1"
+  [[ "$user" == "root" ]] && return 0
+  [[ -f "$UID0_KEEP_FILE" ]] || return 1
+  grep -qxF "$user" "$UID0_KEEP_FILE" 2>/dev/null
+}
+
 php_looks_like_webshell() {
   local f="$1"
   [[ -f "$f" ]] || return 1
@@ -119,6 +142,14 @@ php_looks_like_webshell() {
   fi
   if grep -qE '\$[A-Za-z0-9_]+\s*=\s*chr\(98\)\.chr\(97\)' "$f" 2>/dev/null \
      && grep -qE 'eval\s*\(' "$f" 2>/dev/null; then
+    return 0
+  fi
+  # Campanha "tokien"/Yuki: shell_exec + upload com pasta yuki
+  if grep -qE "session_name\(['\"]tokien['\"]\)" "$f" 2>/dev/null; then
+    return 0
+  fi
+  if grep -qE "mkdir\(['\"]yuki['\"]\)|name=y>Yuki" "$f" 2>/dev/null \
+     && grep -qE 'shell_exec\s*\(' "$f" 2>/dev/null; then
     return 0
   fi
   return 1

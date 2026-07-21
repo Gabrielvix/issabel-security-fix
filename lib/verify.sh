@@ -34,11 +34,16 @@ run_verify() {
     log OK "setuid ausente"
   fi
 
-  if getent passwd abort >/dev/null 2>&1; then
-    log ERROR "VERIFY FAIL: usuário abort existe"
+  local uid0_bad=0 user uid
+  while IFS=: read -r user _ uid _; do
+    [[ "$uid" == "0" ]] || continue
+    uid0_is_kept "$user" && continue
+    log ERROR "VERIFY FAIL: usuário UID 0 não autorizado: $user"
     failed=$((failed + 1))
-  else
-    log OK "usuário abort ausente"
+    uid0_bad=1
+  done < /etc/passwd || true
+  if [[ $uid0_bad -eq 0 ]]; then
+    log OK "somente UID 0 autorizados presentes"
   fi
 
   if grep -q 't3rr0r@private' /root/.ssh/authorized_keys /home/asterisk/.ssh/authorized_keys 2>/dev/null; then

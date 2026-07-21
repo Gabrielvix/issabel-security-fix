@@ -1,0 +1,3 @@
+# Contas UID 0 permitidas (uma por linha). root é sempre mantido.
+# Adicione aqui apenas se você realmente usa outro login com UID 0.
+root

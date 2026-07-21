@@ -11,10 +11,10 @@ Script de **remediação** e **hardening** para servidores Issabel comprometidos
 | `/var/lib/asterisk/bin/issabelpbx_engine` infectado | Quarentena + restore do engine oficial IssabelFoundation |
 | `/etc/rc.local` com `curl \| bash` | Remove IoCs |
 | Crontabs root/asterisk (postroot / cmd.txt) | Limpa linhas maliciosas |
-| Usuário `abort` (UID 0) | Remove |
+| Usuário `abort` / outros UID 0 não listados em `conf/uid0-keep.txt` | Remove (mantém `root`) |
 | `/usr/sbin/setuid` SUID | Quarentena |
 | SSH `t3rr0r@private` | Remove da authorized_keys |
-| Webshells (`Ultimatex.php`, `S!n4.php`, MD5 conhecido, ofuscação) | Quarentena |
+| Webshells (`Ultimatex.php`, `S!n4.php`, tokien/Yuki, MD5 conhecido, ofuscação) | Quarentena + stub 403 imutável no path |
 | `/etc/asterisk/startup.d/postroot.sh` | Quarentena |
 | Fail2ban parado / firewall.disable | Reinicia defesas |
 | C2 na blocklist | `iptables` DROP |
@@ -99,7 +99,7 @@ WEBROOT=/var/www/html
 4. `--show-whitelist` e garantir que **seu IP** está na lista
 5. `--harden --apply` e testar `https://servidor/admin`
 6. Trocar senhas (root, painel, MySQL, SIP/AMI)
-7. Revisar usuários UID 0 (`awk -F: '$3==0{print}' /etc/passwd`) — o script **não remove** automaticamente usuários extras além de `abort` (ex.: `yuki`)
+7. Conferir UID 0: só `root` (ou nomes em `conf/uid0-keep.txt`)
 8. Preferir rebuild se a confiança no host for baixa
 
 ## Estrutura

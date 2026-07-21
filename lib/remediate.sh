@@ -70,17 +70,30 @@ remediate_setuid() {
   log OK "setuid malicioso removido"
 }
 
-remediate_abort_user() {
-  if ! getent passwd abort >/dev/null 2>&1; then
-    return 0
-  fi
-  if [[ $DRY_RUN -eq 1 ]]; then
-    log INFO "[dry-run] removeria usuário abort"
-    return 0
-  fi
-  userdel -rf abort 2>/dev/null || userdel -f abort 2>/dev/null || true
-  log OK "Usuário abort removido"
+remediate_uid0_extras() {
+  local user uid
+  while IFS=: read -r user _ uid _; do
+    [[ "$uid" == "0" ]] || continue
+    uid0_is_kept "$user" && continue
+    if [[ $DRY_RUN -eq 1 ]]; then
+      log INFO "[dry-run] removeria usuário UID 0: $user"
+      continue
+    fi
+    # UID 0 compartilhado com root → userdel pode reclamar de PIDs; force remove a conta
+    userdel -rf "$user" 2>/dev/null || userdel -f "$user" 2>/dev/null || true
+    if getent passwd "$user" >/dev/null 2>&1; then
+      sed -i "/^${user}:/d" /etc/passwd /etc/shadow /etc/group 2>/dev/null || true
+    fi
+    if getent passwd "$user" >/dev/null 2>&1; then
+      log ERROR "Falha ao remover usuário UID 0: $user"
+    else
+      log OK "Usuário UID 0 removido: $user"
+    fi
+  done < /etc/passwd || true
 }
+
+# compat: nome antigo
+remediate_abort_user() { remediate_uid0_extras; }
 
 remediate_ssh_keys() {
   local f
@@ -151,13 +164,13 @@ remediate_webshells() {
     done < "$WEBSHELL_NAMES" || true
   fi
 
-  # MD5 match em php pequenos
+  # MD5 match em php pequenos (inclui tokien ~822/843c e ofuscados ~2068c)
   while IFS= read -r -d '' f; do
     md5="$(md5_of "$f")"
     if [[ -n "$md5" && -n "${KNOWN_MD5[$md5]:-}" ]]; then
       targets+=("$f")
     fi
-  done < <(find "$WEBROOT" -type f -name '*.php' -size 2068c -print0 2>/dev/null) || true
+  done < <(find "$WEBROOT" -type f -name '*.php' -size -5k -print0 2>/dev/null) || true
 
   # ofuscados em drop dirs
   local drop
@@ -191,6 +204,7 @@ remediate_webshells() {
     else
       backup_file "$t"
       quarantine_path "$t"
+      plant_deny_stub "$t"
     fi
   done
 }
@@ -333,12 +347,12 @@ run_remediate() {
   remediate_crontabs
   remediate_profiles
   remediate_setuid
-  remediate_abort_user
+  remediate_uid0_extras
   remediate_ssh_keys
   remediate_tmp_drops
   remediate_webshells
   restore_web_packages
   restore_defenses
   log OK "=== REMEDIAÇÃO concluída ==="
-  log WARN "Revise manualmente usuários UID 0 extras (ex.: yuki) e troque senhas root/Issabel/DB/SIP."
+  log WARN "Troque senhas root/Issabel/DB/SIP se ainda não o fez após o incidente."
 }
