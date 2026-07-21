@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+if [[ $# -lt 1 ]]; then
+  echo "Uso: isf-deny-ip <IP|CIDR>"
+  echo "Remove da whitelist Issabel + Apache e reaplica harden."
+  exit 1
+fi
+exec "${SCRIPT_DIR}/issabel-security-fix.sh" --deny-ip "$@"

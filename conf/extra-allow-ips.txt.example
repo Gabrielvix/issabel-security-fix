@@ -1,0 +1,4 @@
+# IPs/CIDRs extras liberados na UI (alem da whitelist Issabel e fail2ban ignoreip)
+# Copie para extra-allow-ips.txt no servidor do cliente.
+# 203.0.113.10
+# 198.51.100.0/24

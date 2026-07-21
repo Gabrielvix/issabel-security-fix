@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2034
+# Funções comuns — Issabel Security Fix
+
+set -o errtrace
+
+FIX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FIX_VERSION="1.3.0"
+FIX_TS="$(date +%Y%m%d-%H%M%S)"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/issabel-security-fix/${FIX_TS}}"
+LOG_FILE="${LOG_FILE:-/var/log/issabel-security-fix.log}"
+QUARANTINE_DIR="${QUARANTINE_DIR:-${FIX_ROOT}/quarantine/${FIX_TS}}"
+
+WEBROOT="${WEBROOT:-/var/www/html}"
+ENGINE_PATH="${ENGINE_PATH:-/var/lib/asterisk/bin/issabelpbx_engine}"
+ENGINE_URL="${ENGINE_URL:-https://raw.githubusercontent.com/IssabelFoundation/issabelPBX/master/framework/amp_conf/bin/issabelpbx_engine}"
+IPTABLES_DB="${IPTABLES_DB:-/var/www/db/iptables.db}"
+RC_LOCAL="${RC_LOCAL:-/etc/rc.local}"
+SETUID_BIN="${SETUID_BIN:-/usr/sbin/setuid}"
+STARTUP_D="${STARTUP_D:-/etc/asterisk/startup.d}"
+
+C2_LIST="${FIX_ROOT}/conf/c2-blocklist.txt"
+WEBSHELL_MD5="${FIX_ROOT}/conf/webshell-md5.txt"
+WEBSHELL_NAMES="${FIX_ROOT}/conf/webshell-names.txt"
+EXTRA_ALLOW_FILE="${FIX_ROOT}/conf/extra-allow-ips.txt"
+
+DRY_RUN=1
+APPLY=0
+VERBOSE=0
+FINDINGS=0
+CRITICAL=0
+
+# cores
+if [[ -t 1 ]]; then
+  C_RED=$'\033[1;31m'; C_GRN=$'\033[1;32m'; C_YEL=$'\033[1;33m'
+  C_BLU=$'\033[1;34m'; C_RST=$'\033[0m'
+else
+  C_RED=; C_GRN=; C_YEL=; C_BLU=; C_RST=
+fi
+
+log() {
+  local level="$1"; shift
+  local msg="$*"
+  local line="[$(date '+%F %T')] [$level] $msg"
+  mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+  echo "$line" >>"$LOG_FILE" 2>/dev/null || true
+  case "$level" in
+    ERROR|CRITICAL) echo "${C_RED}${line}${C_RST}" >&2 ;;
+    WARN)           echo "${C_YEL}${line}${C_RST}" >&2 ;;
+    OK)             echo "${C_GRN}${line}${C_RST}" ;;
+    INFO)           echo "${C_BLU}${line}${C_RST}" ;;
+    *)              echo "$line" ;;
+  esac
+}
+
+die() { log ERROR "$*"; exit 1; }
+
+require_root() {
+  [[ $EUID -eq 0 ]] || die "Execute como root (sudo)."
+}
+
+inc_finding() {
+  FINDINGS=$((FINDINGS + 1))
+  if [[ "${1:-}" == "critical" ]]; then
+    CRITICAL=$((CRITICAL + 1))
+  fi
+  return 0
+}
+
+backup_file() {
+  local f="$1"
+  [[ -e "$f" ]] || return 0
+  mkdir -p "$BACKUP_DIR"
+  local dest="${BACKUP_DIR}${f}"
+  mkdir -p "$(dirname "$dest")"
+  cp -a "$f" "$dest"
+  log INFO "Backup: $f -> $dest"
+}
+
+quarantine_path() {
+  local f="$1"
+  [[ -e "$f" ]] || return 0
+  mkdir -p "$QUARANTINE_DIR"
+  local base
+  base="$(echo "$f" | tr '/' '_')"
+  mv -f "$f" "${QUARANTINE_DIR}/${base}"
+  log OK "Quarentena: $f"
+}
+
+is_ipv4_or_cidr() {
+  local v="$1"
+  [[ "$v" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[12][0-9]|3[0-2]))?$ ]]
+}
+
+current_ssh_ip() {
+  local ip=""
+  if [[ -n "${SSH_CLIENT:-}" ]]; then
+    ip="${SSH_CLIENT%% *}"
+  elif [[ -n "${SSH_CONNECTION:-}" ]]; then
+    ip="${SSH_CONNECTION%% *}"
+  fi
+  if is_ipv4_or_cidr "$ip"; then
+    echo "$ip"
+  fi
+}
+
+file_matches_ioc_content() {
+  local f="$1"
+  [[ -f "$f" ]] || return 1
+  grep -qE '212\.83\.160\.70|postroot\.sh|t3rr0r@private|useradd[[:space:]].*abort|/usr/sbin/setuid|searchshells\.sh|cmd\.txt>/tmp/a\.txt' "$f" 2>/dev/null
+}
+
+php_looks_like_webshell() {
+  local f="$1"
+  [[ -f "$f" ]] || return 1
+  # Assinatura desta campanha: monta base64_decode/gzuncompress via chr() e dá eval
+  if grep -qE 'chr\(98\)\.chr\(97\)\.chr\(115\)\.chr\(101\)\.chr\(54\)\.chr\(52\)' "$f" 2>/dev/null; then
+    return 0
+  fi
+  if grep -qE '\$[A-Za-z0-9_]+\s*=\s*chr\(98\)\.chr\(97\)' "$f" 2>/dev/null \
+     && grep -qE 'eval\s*\(' "$f" 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+md5_of() {
+  md5sum "$1" 2>/dev/null | awk '{print $1}'
+}
+
+ensure_dirs() {
+  mkdir -p "$BACKUP_DIR" "$QUARANTINE_DIR" "$(dirname "$LOG_FILE")"
+}

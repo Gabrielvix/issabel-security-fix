@@ -1,0 +1,6 @@
+# Dominios Let's Encrypt (um por linha).
+# Copie para ssl-domains.txt OU deixe ausente/vazio para AUTODETECT
+# a partir de Apache ServerName/Alias + /etc/letsencrypt/live/ + hostname.
+#
+# pbx.cliente.exemplo
+# pbx.cliente.exemplo.br

@@ -1,0 +1,4 @@
+# Bloqueia execução PHP em diretórios de upload/cache
+<FilesMatch "\.(?i:php|phtml|php[0-9]|phar)$">
+    Require all denied
+</FilesMatch>

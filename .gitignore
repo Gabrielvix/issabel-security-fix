@@ -1,0 +1,10 @@
+quarantine/
+*.log
+*.bak
+.conf.local
+vendor/issabelpbx_engine.clean
+.DS_Store
+# Dados locais do cliente (nao publicar)
+conf/extra-allow-ips.txt
+conf/ssl-domains.txt
+tests/*.stamp

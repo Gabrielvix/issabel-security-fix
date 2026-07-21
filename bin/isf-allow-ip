@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Libera IP na whitelist e reaplica restricao Apache (escape de lockout)
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/whitelist.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/harden.sh"
+
+if [[ $# -lt 1 ]]; then
+  cat <<EOF2
+Uso: $(basename "$0") <IP|CIDR> [nota]
+
+Sempre liberados automaticamente:
+  10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1
+
+Exemplos:
+  $(basename "$0") 203.0.113.50
+  $(basename "$0") 203.0.113.50 "VPN escritorio"
+
+  ${SCRIPT_DIR}/issabel-security-fix.sh --allow-ip 203.0.113.50
+EOF2
+  exit 1
+fi
+
+require_root
+ensure_dirs
+DRY_RUN=0
+APPLY=1
+allow_ip_cli "$1" "${2:-isf-allow-ip $(date +%F)}"
