@@ -30,7 +30,11 @@ generate_admin_htaccess_v2() {
   local ip
   {
     echo "# Gerado por issabel-security-fix ${FIX_VERSION} em $(date -Iseconds)"
-    echo "# Fonte: whitelist Issabel (iptables.db) + fail2ban ignoreip + SSH atual + extra-allow-ips.txt"
+    if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
+      echo "# Breakglass: whitelist explícita (sem auto-RFC1918) + fail2ban + SSH + extra-allow"
+    else
+      echo "# Fonte: whitelist Issabel (iptables.db) + fail2ban ignoreip + SSH atual + extra-allow-ips.txt"
+    fi
     echo "# Atualize com: issabel-security-fix.sh --harden"
     echo
     echo "# 1) Restrição por IP (Apache 2.4)"
@@ -39,7 +43,7 @@ generate_admin_htaccess_v2() {
     while read -r ip; do
       [[ -n "$ip" ]] || continue
       echo "    Require ip $ip"
-    done < <(collect_whitelist_ips)
+    done < <(harden_collect_ips)
     echo "  </RequireAny>"
     echo "</IfModule>"
     echo
@@ -73,14 +77,32 @@ generate_deny_php_htaccess() {
 EOF
 }
 
+# Lista de IPs para restrição Apache (breakglass = sem RFC1918 automático)
+harden_collect_ips() {
+  if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
+    collect_whitelist_ips_breakglass
+  else
+    collect_whitelist_ips
+  fi
+}
+
 generate_apache_dropin() {
   local out="$1"
   local ip
+  local bg=0
+  if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
+    bg=1
+  fi
   {
     echo "# Gerado por issabel-security-fix ${FIX_VERSION}"
-    echo "# Restringe /admin E a UI Issabel (index.php = firewall/whitelist/fail2ban/etc)"
-    echo "# Sempre liberado: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, localhost"
-    echo "# + whitelist Issabel + fail2ban ignoreip + conf/extra-allow-ips.txt"
+    if [[ $bg -eq 1 ]]; then
+      echo "# MODO BREAKGLASS OTP: index.php aberto (login+OTP); demais endpoints = whitelist explícita"
+      echo "# (sem auto-RFC1918). Após OTP o IP entra na whitelist por TTL_HOURS."
+    else
+      echo "# Restringe /admin E a UI Issabel (index.php = firewall/whitelist/fail2ban/etc)"
+      echo "# Sempre liberado: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, localhost"
+      echo "# + whitelist Issabel + fail2ban ignoreip + conf/extra-allow-ips.txt"
+    fi
     echo
     echo "<Directory \"${WEBROOT}/admin\">"
     echo "    AllowOverride All"
@@ -89,29 +111,50 @@ generate_apache_dropin() {
     while read -r ip; do
       [[ -n "$ip" ]] || continue
       echo "      Require ip $ip"
-    done < <(collect_whitelist_ips)
+    done < <(harden_collect_ips)
     echo "    </RequireAny>"
     echo "</Directory>"
     echo
-    echo "# Interface Issabel (index.php?menu=sec_whitelist, sec_rules, sec_fb_*, ...)"
-    echo "<FilesMatch \"^(index|configs|config\\.all|rest|issabel_warning_authentication)\\.php\$\">"
-    echo "    <RequireAny>"
-    while read -r ip; do
-      [[ -n "$ip" ]] || continue
-      echo "      Require ip $ip"
-    done < <(collect_whitelist_ips)
-    echo "    </RequireAny>"
-    echo "</FilesMatch>"
-    echo
-    echo "# Raiz / tambem restrita (senao DirectoryIndex negado vira HTTP Server Test Page)"
-    echo "<LocationMatch \"^/\$\">"
-    echo "    <RequireAny>"
-    while read -r ip; do
-      [[ -n "$ip" ]] || continue
-      echo "      Require ip $ip"
-    done < <(collect_whitelist_ips)
-    echo "    </RequireAny>"
-    echo "</LocationMatch>"
+    if [[ $bg -eq 1 ]]; then
+      # Login acessível de qualquer IP; OTP no PHP decide
+      echo "<Files \"index.php\">"
+      echo "    Require all granted"
+      echo "</Files>"
+      echo
+      echo "# Demais entrypoints Issabel ainda restritos (whitelist explícita)"
+      echo "<FilesMatch \"^(configs|config\\.all|rest|issabel_warning_authentication)\\.php\$\">"
+      echo "    <RequireAny>"
+      while read -r ip; do
+        [[ -n "$ip" ]] || continue
+        echo "      Require ip $ip"
+      done < <(harden_collect_ips)
+      echo "    </RequireAny>"
+      echo "</FilesMatch>"
+      echo
+      echo "<LocationMatch \"^/\$\">"
+      echo "    Require all granted"
+      echo "</LocationMatch>"
+    else
+      echo "# Interface Issabel (index.php?menu=sec_whitelist, sec_rules, sec_fb_*, ...)"
+      echo "<FilesMatch \"^(index|configs|config\\.all|rest|issabel_warning_authentication)\\.php\$\">"
+      echo "    <RequireAny>"
+      while read -r ip; do
+        [[ -n "$ip" ]] || continue
+        echo "      Require ip $ip"
+      done < <(harden_collect_ips)
+      echo "    </RequireAny>"
+      echo "</FilesMatch>"
+      echo
+      echo "# Raiz / tambem restrita (senao DirectoryIndex negado vira HTTP Server Test Page)"
+      echo "<LocationMatch \"^/\$\">"
+      echo "    <RequireAny>"
+      while read -r ip; do
+        [[ -n "$ip" ]] || continue
+        echo "      Require ip $ip"
+      done < <(harden_collect_ips)
+      echo "    </RequireAny>"
+      echo "</LocationMatch>"
+    fi
   } >"$out"
 }
 
@@ -392,8 +435,12 @@ run_harden() {
   log INFO "=== HARDENING (dry-run=$DRY_RUN) ==="
   print_whitelist
   local count
-  count="$(collect_whitelist_ips | wc -l)"
-  if [[ "$count" -lt 2 ]]; then
+  count="$(harden_collect_ips | wc -l)"
+  local min_ips=2
+  if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
+    min_ips=1
+  fi
+  if [[ "$count" -lt "$min_ips" ]]; then
     log ERROR "Whitelist resultante muito pequena ($count). Abortando harden para evitar lockout total."
     return 1
   fi
@@ -408,7 +455,13 @@ run_harden() {
     install_whitelist_sync_cron
     install_integrity_cron
   fi
+  if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
+    run_breakglass_install
+  fi
   log OK "=== HARDENING concluído ==="
   log WARN "Teste o acesso ao /admin a partir de um IP liberado antes de sair da sessão SSH."
   log INFO "Nota: exec/system NÃO foram desabilitados no PHP global (Issabel depende disso). Contenção = engine off em uploads + IP no /admin."
+  if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
+    log WARN "Break-glass OTP ATIVO: index.php público; OTP fora da whitelist explícita; IP liberado por $(breakglass_ttl_hours)h após OTP."
+  fi
 }

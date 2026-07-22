@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=/dev/null
+source "${ROOT}/lib/common.sh"
+# shellcheck source=/dev/null
+source "${ROOT}/lib/breakglass.sh"
+require_root
+enroll_totp_user "${1:-}"

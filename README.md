@@ -27,14 +27,11 @@ Script de **remediação** e **hardening** para servidores Issabel comprometidos
 
 1. Lê a **whitelist do Issabel** em `/var/www/db/iptables.db` (módulo Security → Whitelist)
 2. Une com `fail2ban ignoreip`, IP da sessão SSH atual e `conf/extra-allow-ips.txt`
-3. **Sempre libera redes locais:** `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, localhost
-4. Restringe por IP:
-   - `/admin` (FreePBX/IssabelPBX)
-   - `index.php` / `configs.php` / `rest.php` (UI Issabel: firewall, whitelist, fail2ban, etc.)
-5. Drop-in Apache: `/etc/httpd/conf.d/issabel-admin-ip-restrict.conf`
-6. Bloqueia execução PHP em dirs de cache/upload
-7. Cron de re-scan + re-sync da whitelist
-8. CLI de escape: `isf-allow-ip` / `--allow-ip`
+3. **Modo clássico:** libera redes locais `10/8`, `172.16/12`, `192.168/16`, localhost
+4. **Break-glass OTP (v1.5):** se `conf/breakglass.conf` `ENABLED=1`, `index.php` fica público; OTP obrigatório fora da whitelist **explícita** (sem auto-RFC1918); após OTP o IP entra na whitelist por **10h**. Ver [docs/BREAKGLASS.md](docs/BREAKGLASS.md)
+5. Restringe por IP `/admin` e entrypoints sensíveis
+6. Drop-in Apache + bloqueio de PHP em dirs de cache/upload
+7. Cron de re-scan + sync whitelist (+ expire break-glass)
 
 ### Liberar IP pelo terminal (se ficou bloqueado)
 

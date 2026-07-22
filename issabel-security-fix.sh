@@ -29,6 +29,8 @@ source "${SCRIPT_DIR}/lib/verify.sh"
 source "${SCRIPT_DIR}/lib/ssl.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib/campaign.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/breakglass.sh"
 
 usage() {
   cat <<EOF
@@ -44,6 +46,9 @@ Uso:
   $0 --deny-ip <IP>         Remove IP da whitelist e bloqueia no Apache na hora
   $0 --fix-ssl [--dry-run|--apply]
                             Regenera Let's Encrypt (conf/ssl-domains.txt) e atualiza Apache
+  $0 --expire-breakglass [--apply]
+                            Remove IPs temporários break-glass expirados e re-sincroniza Apache
+  $0 --enroll-totp <user>   Gera TOTP (Google Authenticator) para usuário Issabel
   $0 --verify               Valida limpeza (engine, persistência, upload PHP)
   $0 --all [--dry-run|--apply]
                             scan + fix + harden (+ verify se --apply)
@@ -61,11 +66,18 @@ Arquivos de configuração:
   conf/webshell-names.txt     Nomes de arquivos suspeitos
   conf/webshell-paths.txt     Caminhos fixos de artefatos da campanha
   conf/extra-allow-ips.txt    IPs extras liberados na UI
+  conf/breakglass.conf        OTP fora da whitelist explícita (TTL 10h)
 
-Sempre liberado no Apache (além da whitelist):
+Break-glass OTP (ENABLED=1 em conf/breakglass.conf):
+  - IP ∉ whitelist Issabel → senha + OTP obrigatórios
+  - Após OTP OK → sessão + IP na whitelist por TTL_HOURS (padrão 10h)
+  - Cadastro: isf-enroll-totp admin
+  - index.php fica público; /admin e configs.php seguem whitelist (sem auto-RFC1918)
+
+Sempre liberado no Apache (modo clássico, breakglass OFF):
   10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, localhost
 
-Escape se ficar fora da whitelist:
+Escape se ficou fora da whitelist:
   $0 --allow-ip SEU.IP.PUBLICO
   # ou: /opt/issabel-security-fix/bin/isf-allow-ip SEU.IP.PUBLICO
 
@@ -73,7 +85,8 @@ IMPORTANTE:
   1) Rode --scan e --fix --dry-run primeiro.
   2) Bloqueie o C2 no firewall perimetral se possível.
   3) Após --harden --apply, teste /index.php e /admin do IP liberado.
-  4) Troque senhas (root, Issabel, DB, SIP) e revise usuários UID 0.
+  4) Com breakglass: enroll TOTP ANTES de sair do IP confiável.
+  5) Troque senhas (root, Issabel, DB, SIP) e revise usuários UID 0.
 EOF
 }
 
@@ -85,6 +98,8 @@ DO_SSL=0
 DO_SHOW_WL=0
 DO_ALLOW_IP=""
 DO_DENY_IP=""
+DO_EXPIRE_BG=0
+DO_ENROLL_USER=""
 ALLOW_NOTE=""
 MODE_SET=0
 
@@ -100,6 +115,13 @@ parse_args() {
       --harden) DO_HARDEN=1; MODE_SET=1; shift ;;
       --verify) DO_VERIFY=1; MODE_SET=1; shift ;;
       --fix-ssl) DO_SSL=1; MODE_SET=1; shift ;;
+      --expire-breakglass) DO_EXPIRE_BG=1; MODE_SET=1; shift ;;
+      --enroll-totp)
+        MODE_SET=1
+        shift
+        DO_ENROLL_USER="${1:-}"
+        shift || true
+        ;;
       --all) DO_FIX=1; DO_HARDEN=1; DO_SCAN=1; DO_VERIFY=1; DO_SSL=1; MODE_SET=1; shift ;;
       --show-whitelist) DO_SHOW_WL=1; MODE_SET=1; shift ;;
       --allow-ip)
@@ -135,6 +157,11 @@ main() {
 
   log INFO "Issabel Security Fix v${FIX_VERSION} | host=$(hostname) | dry-run=$DRY_RUN"
 
+  if [[ -n "$DO_ENROLL_USER" ]]; then
+    enroll_totp_user "$DO_ENROLL_USER"
+    exit $?
+  fi
+
   if [[ -n "$DO_ALLOW_IP" ]]; then
     DRY_RUN=0
     APPLY=1
@@ -151,6 +178,14 @@ main() {
 
   if [[ $DO_SHOW_WL -eq 1 ]]; then
     print_whitelist
+    exit 0
+  fi
+
+  if [[ $DO_EXPIRE_BG -eq 1 ]]; then
+    if [[ $APPLY -eq 0 ]]; then
+      log WARN "expire-breakglass em dry-run. Use --apply para remover IPs expirados."
+    fi
+    expire_breakglass_whitelist
     exit 0
   fi
 
