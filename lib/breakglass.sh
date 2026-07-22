@@ -276,14 +276,35 @@ install_breakglass_cli() {
   fi
   cat >"${FIX_ROOT}/bin/isf-enroll-totp" <<'EOF'
 #!/usr/bin/env bash
+# Gera TOTP (Google Authenticator / FreeOTP) para usuário Issabel
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+
 # shellcheck source=/dev/null
 source "${ROOT}/lib/common.sh"
 # shellcheck source=/dev/null
 source "${ROOT}/lib/breakglass.sh"
+
+if [[ $# -lt 1 ]]; then
+  cat <<EOF2
+Uso: $(basename "$0") <usuario_issabel>
+
+Exemplos:
+  $(basename "$0") admin
+  ${ROOT}/issabel-security-fix.sh --enroll-totp admin
+EOF2
+  exit 1
+fi
+
 require_root
-enroll_totp_user "${1:-}"
+enroll_totp_user "$1"
 EOF
   chmod +x "${FIX_ROOT}/bin/isf-enroll-totp"
   ln -sfn "${FIX_ROOT}/bin/isf-enroll-totp" /usr/local/sbin/isf-enroll-totp
