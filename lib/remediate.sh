@@ -20,8 +20,10 @@ clean_cron_file() {
 }
 
 remediate_crontabs() {
-  clean_cron_file /var/spool/cron/root
-  clean_cron_file /var/spool/cron/asterisk
+  local f
+  for f in /etc/crontab /etc/cron.d/* /var/spool/cron/root /var/spool/cron/asterisk /var/spool/cron/apache; do
+    clean_cron_file "$f"
+  done
   # limpa também via crontab API se existir
   if [[ $DRY_RUN -eq 0 ]]; then
     if crontab -l 2>/dev/null | grep -qE '212\.83\.160\.70|postroot'; then
@@ -31,6 +33,10 @@ remediate_crontabs() {
     if sudo -u asterisk crontab -l 2>/dev/null | grep -qE '212\.83\.160\.70|cmd\.txt'; then
       sudo -u asterisk crontab -l 2>/dev/null | grep -vE '212\.83\.160\.70|postroot\.sh|cmd\.txt|/tmp/a\.txt' | sudo -u asterisk crontab - || true
       log OK "crontab asterisk reescrito sem IoCs"
+    fi
+    if id apache &>/dev/null && crontab -u apache -l 2>/dev/null | grep -qE '212\.83\.160\.70|postroot|cmd\.txt'; then
+      crontab -u apache -l 2>/dev/null | grep -vE '212\.83\.160\.70|postroot\.sh|cmd\.txt|/tmp/a\.txt' | crontab -u apache - || true
+      log OK "crontab apache reescrito sem IoCs"
     fi
   fi
 }
@@ -131,7 +137,7 @@ remediate_startup_d() {
 
 remediate_tmp_drops() {
   local f
-  for f in /tmp/a.txt /tmp/s.txt /tmp/setuid /tmp/setuid.c; do
+  for f in /tmp/a.txt /tmp/a.tx /tmp/s.txt /tmp/setuid /tmp/setuid.c; do
     [[ -e "$f" ]] || continue
     if [[ $DRY_RUN -eq 1 ]]; then
       log INFO "[dry-run] removeria $f"
@@ -159,8 +165,9 @@ remediate_webshells() {
     while read -r name; do
       [[ -n "$name" ]] || continue
       while IFS= read -r -d '' f; do
+        should_quarantine_named_webshell "$f" "$name" || continue
         targets+=("$f")
-      done < <(find "$WEBROOT" -type f -name "$name" -print0 2>/dev/null) || true
+      done < <(find_webshell_files_by_name "$name") || true
     done < "$WEBSHELL_NAMES" || true
   fi
 
@@ -172,7 +179,7 @@ remediate_webshells() {
     fi
   done < <(find "$WEBROOT" -type f -name '*.php' -size -5k -print0 2>/dev/null) || true
 
-  # ofuscados em drop dirs
+  # ofuscados em drop dirs (não varrer admin/modules/* — evita tocar em guimodule/page.* legítimos)
   local drop
   for drop in "$WEBROOT" "$WEBROOT/cache" "$WEBROOT/images" "$WEBROOT/tmp" \
               "$WEBROOT/templates_c" "$WEBROOT/captures" "$WEBROOT/download" \
@@ -180,7 +187,7 @@ remediate_webshells() {
               "$WEBROOT/lang" "$WEBROOT/libs" "$WEBROOT/modules" \
               "$WEBROOT/panels" "$WEBROOT/configs" "$WEBROOT/var" \
               "$WEBROOT/themes" "$WEBROOT/help" "$WEBROOT/reciclar" \
-              "$WEBROOT/admin" "$WEBROOT/_jsons"; do
+              "$WEBROOT/_jsons"; do
     [[ -d "$drop" ]] || continue
     while IFS= read -r -d '' f; do
       local sz
@@ -287,17 +294,22 @@ block_c2() {
 restore_defenses() {
   log INFO "Restaurando defesas..."
   if [[ $DRY_RUN -eq 1 ]]; then
-    log INFO "[dry-run] iniciaria fail2ban e removeria firewall.disable"
+    log INFO "[dry-run] iniciaria fail2ban, amportal firewall e removeria firewall.disable"
     return 0
   fi
   rm -f /var/spool/asterisk/incron/firewall.disable 2>/dev/null || true
+  rm -f /var/run/fail2ban/fail2ban.sock 2>/dev/null || true
+  systemctl daemon-reload >/dev/null 2>&1 || true
   systemctl enable fail2ban >/dev/null 2>&1 || true
-  systemctl start fail2ban >/dev/null 2>&1 || log WARN "Falha ao iniciar fail2ban"
-  # tenta recarregar regras Issabel se helper existir
+  systemctl restart fail2ban >/dev/null 2>&1 || systemctl start fail2ban >/dev/null 2>&1 || log WARN "Falha ao iniciar fail2ban"
+  if [[ -x /usr/sbin/amportal ]]; then
+    /usr/sbin/amportal firewall enable >/dev/null 2>&1 || log WARN "amportal firewall enable falhou"
+    /usr/sbin/amportal firewall start >/dev/null 2>&1 || log WARN "amportal firewall start falhou"
+  fi
   if command -v issabel-helper >/dev/null 2>&1; then
     issabel-helper fwconfig --load >/dev/null 2>&1 || log WARN "fwconfig --load retornou erro (revisar firewall Issabel)"
   fi
-  log OK "Defesas: fail2ban iniciado / firewall.disable removido"
+  log OK "Defesas: fail2ban + firewall Issabel (best-effort)"
 }
 
 remediate_profiles() {
@@ -341,6 +353,7 @@ run_remediate() {
   ensure_dirs
   # ordem crítica: cortar C2 e engine primeiro (para não reescrever durante limpeza)
   block_c2
+  kill_malware_processes
   restore_engine
   remediate_startup_d
   remediate_rclocal
@@ -351,6 +364,7 @@ run_remediate() {
   remediate_ssh_keys
   remediate_tmp_drops
   remediate_webshells
+  remediate_campaign_extras
   restore_web_packages
   restore_defenses
   log OK "=== REMEDIAÇÃO concluída ==="

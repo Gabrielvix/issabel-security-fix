@@ -16,7 +16,11 @@ Script de **remediação** e **hardening** para servidores Issabel comprometidos
 | SSH `t3rr0r@private` | Remove da authorized_keys |
 | Webshells (`Ultimatex.php`, `S!n4.php`, tokien/Yuki, MD5 conhecido, ofuscação) | Quarentena + stub 403 imutável no path |
 | `/etc/asterisk/startup.d/postroot.sh` | Quarentena |
-| Fail2ban parado / firewall.disable | Reinicia defesas |
+| Dialplan (`thanku-outcall`, C2 em `extensions_custom.conf`) | Remove linhas + `dialplan reload` |
+| `admin/modules/freepbx_ha/license.php`, `rest_phones/ajax.php` | Quarentena (lista `conf/webshell-paths.txt`) |
+| Processos `curl`/PHP ligados ao C2 | `pkill` nos padrões conhecidos |
+| Crons em `/etc/crontab`, `/etc/cron.d/*`, usuário `apache` | Limpa IoCs |
+| Fail2ban parado / firewall.disable | Reinicia fail2ban (socket) + `amportal firewall` + `fwconfig` |
 | C2 na blocklist | `iptables` DROP |
 
 ## Hardening incluso
@@ -81,6 +85,7 @@ conf/extra-allow-ips.txt   # IPs/CIDRs extras do time
 conf/c2-blocklist.txt      # C2 adicionais
 conf/webshell-md5.txt      # hashes conhecidos
 conf/webshell-names.txt    # nomes de drop
+conf/webshell-paths.txt    # caminhos fixos (ex.: license.php falsa)
 ```
 
 Variáveis de ambiente:
@@ -106,7 +111,7 @@ WEBROOT=/var/www/html
 
 ```text
 issabel-security-fix.sh
-lib/{common,scan,remediate,whitelist,harden}.sh
+lib/{common,scan,remediate,whitelist,harden,campaign,verify,ssl}.sh
 conf/
 templates/
 docs/
@@ -116,7 +121,7 @@ quarantine/          # artefatos removidos (gitignored)
 ## Limitações
 
 - Não reverte todas as alterações possíveis de um rootkit
-- Não reescreve o dialplan Asterisk nem audita CDR/fraude de chamadas
+- Não reescreve todo o dialplan Asterisk nem audita CDR/fraude de chamadas (só remove IoCs conhecidos em `extensions_custom.conf`)
 - Restore do engine depende de rede até o GitHub (ou vendor local)
 - Restringir `/admin` por IP não protege SIP/AMI — mantenha firewall Issabel + Fail2ban
 

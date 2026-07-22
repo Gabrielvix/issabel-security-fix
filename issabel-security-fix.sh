@@ -27,6 +27,8 @@ source "${SCRIPT_DIR}/lib/harden.sh"
 source "${SCRIPT_DIR}/lib/verify.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib/ssl.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/campaign.sh"
 
 usage() {
   cat <<EOF
@@ -57,6 +59,7 @@ Arquivos de configuração:
   conf/c2-blocklist.txt       IPs C2 para bloquear
   conf/webshell-md5.txt       MD5s de webshells conhecidas
   conf/webshell-names.txt     Nomes de arquivos suspeitos
+  conf/webshell-paths.txt     Caminhos fixos de artefatos da campanha
   conf/extra-allow-ips.txt    IPs extras liberados na UI
 
 Sempre liberado no Apache (além da whitelist):

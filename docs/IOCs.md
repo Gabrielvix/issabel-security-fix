@@ -19,5 +19,6 @@ Campanha observada em Issabel/FreePBX-like:
 ## Pós-incidente
 
 - Auditar CDR / destinos internacionais
+- Revisar `extensions_custom.conf` após `--fix` (fraude toll)
 - Rotacionar segredos
 - Considerar reinstalação limpa + restore de backup de configuração

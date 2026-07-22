@@ -5,7 +5,7 @@
 set -o errtrace
 
 FIX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FIX_VERSION="1.3.1"
+FIX_VERSION="1.4.0"
 FIX_TS="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/issabel-security-fix/${FIX_TS}}"
 LOG_FILE="${LOG_FILE:-/var/log/issabel-security-fix.log}"
@@ -123,7 +123,37 @@ current_ssh_ip() {
 file_matches_ioc_content() {
   local f="$1"
   [[ -f "$f" ]] || return 1
-  grep -qE '212\.83\.160\.70|postroot\.sh|t3rr0r@private|useradd[[:space:]].*abort|/usr/sbin/setuid|searchshells\.sh|cmd\.txt>/tmp/a\.txt' "$f" 2>/dev/null
+  grep -qE '212\.83\.160\.70|postroot\.sh|t3rr0r@private|useradd[[:space:]].*abort|/usr/sbin/setuid|searchshells\.sh|cmd\.txt>/tmp/a\.txt|thanku-outcall|thankuohoh' "$f" 2>/dev/null
+}
+
+# Busca por nome de webshell; exclui gravações legítimas (ex.: recordings/audio.php)
+find_webshell_files_by_name() {
+  local name="$1"
+  find "$WEBROOT" -type f -name "$name" \
+    ! -path '*/recordings/*' \
+    ! -path '*/monitor/*' \
+    -print0 2>/dev/null
+}
+
+# Nomes comuns demais — só trata como webshell se a assinatura bater
+webshell_name_is_ambiguous() {
+  case "$1" in
+    configs.php|config.all.php|page.framework.php|graph.php|h.php|free.php|fa.php|italy.php|uk.php|super.php)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+should_quarantine_named_webshell() {
+  local f="$1"
+  local name="$2"
+  if webshell_name_is_ambiguous "$name"; then
+    php_looks_like_webshell "$f" && return 0
+    file_matches_ioc_content "$f" && return 0
+    return 1
+  fi
+  return 0
 }
 
 uid0_is_kept() {

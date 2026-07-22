@@ -88,7 +88,7 @@ scan_ssh_keys() {
 scan_crontabs() {
   log INFO "Analisando crontabs..."
   local f
-  for f in /var/spool/cron/root /var/spool/cron/asterisk; do
+  for f in /var/spool/cron/root /var/spool/cron/asterisk /var/spool/cron/apache; do
     if [[ -f "$f" ]] && file_matches_ioc_content "$f"; then
       log CRITICAL "Cron infectado: $f"
       inc_finding critical
@@ -127,8 +127,9 @@ scan_webshells() {
     while read -r name; do
       [[ -n "$name" ]] || continue
       while IFS= read -r -d '' f; do
+        should_quarantine_named_webshell "$f" "$name" || continue
         mark_shell "$f" "nome"
-      done < <(find "$WEBROOT" -type f -name "$name" -print0 2>/dev/null) || true
+      done < <(find_webshell_files_by_name "$name") || true
     done < "$WEBSHELL_NAMES" || true
   fi
 
@@ -146,7 +147,7 @@ scan_webshells() {
               "$WEBROOT/lang" "$WEBROOT/libs" "$WEBROOT/panels" \
               "$WEBROOT/configs" "$WEBROOT/var" "$WEBROOT/themes" \
               "$WEBROOT/help" "$WEBROOT/reciclar" "$WEBROOT/_jsons" \
-              "$WEBROOT/admin" "$WEBROOT/modules"; do
+              "$WEBROOT/modules"; do
     [[ -d "$drop" ]] || continue
     while IFS= read -r -d '' f; do
       local sz
@@ -210,6 +211,7 @@ run_scan() {
   scan_ssh_keys
   scan_crontabs
   scan_shell_profiles
+  scan_campaign_extras
   scan_webshells
   scan_defenses
   log INFO "=== RESULTADO: ${FINDINGS} achados (${CRITICAL} críticos) ==="

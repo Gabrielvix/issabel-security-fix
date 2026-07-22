@@ -60,6 +60,25 @@ run_verify() {
     log OK "startup.d limpo (ou sem postroot malicioso)"
   fi
 
+  if [[ -f "$EXTENSIONS_CUSTOM" ]] && grep -qE 'thanku-outcall|thankuohoh|212\.83\.160\.70' "$EXTENSIONS_CUSTOM" 2>/dev/null; then
+    log ERROR "VERIFY FAIL: IoC no dialplan ($EXTENSIONS_CUSTOM)"
+    failed=$((failed + 1))
+  else
+    log OK "dialplan sem IoCs de fraude conhecidos"
+  fi
+
+  local rel fp
+  if [[ -f "${FIX_ROOT}/conf/webshell-paths.txt" ]]; then
+    while read -r rel; do
+      [[ -n "$rel" && "$rel" != \#* ]] || continue
+      fp="${WEBROOT}/${rel}"
+      if [[ -f "$fp" ]]; then
+        log ERROR "VERIFY FAIL: artefato de campanha ainda presente: $fp"
+        failed=$((failed + 1))
+      fi
+    done <"${FIX_ROOT}/conf/webshell-paths.txt" || true
+  fi
+
   # 3) C2 bloqueado
   if iptables -C OUTPUT -d 212.83.160.70 -j DROP 2>/dev/null; then
     log OK "C2 bloqueado no iptables OUTPUT"

@@ -1,0 +1,3 @@
+# Caminhos relativos a WEBROOT — artefatos desta campanha (sempre quarentena se existirem)
+admin/modules/freepbx_ha/license.php
+rest_phones/ajax.php
