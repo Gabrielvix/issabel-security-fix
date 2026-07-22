@@ -132,7 +132,9 @@ isf-enroll-totp admin
 ```
 
 **Interface web (intuitivo):**  
-[System → Users → editar usuário](https://pabx.example.com/index.php?menu=userlist&action=edit&id_user=1) → seção **Autenticação em dois fatores (TOTP)** → Gerar novo TOTP → Salvar → escanear QR no autenticador.
+System → Users → editar usuário → seção **Autenticação em dois fatores (TOTP)** → Gerar novo TOTP → Salvar → escanear QR no autenticador.
+
+O QR usa automaticamente o **domínio/hostname do próprio servidor** (do cliente) + nome do usuário no Authenticator.
 
 O plugin é instalado no `--harden` mesmo com OTP desligado, para você cadastrar tokens **antes** de ativar o break-glass.
 

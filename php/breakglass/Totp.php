@@ -51,27 +51,59 @@ class IsfTotp
 
     /**
      * Nome que aparece no Authenticator (issuer).
-     * Preferência: HTTP_HOST → hostname FQDN → "Issabel".
-     * Ex.: pabx.example.com:admin
+     * Sempre o domínio/hostname DESTE servidor (do cliente), nunca um valor fixo de outro site.
+     * Preferência: HTTP_HOST → SERVER_NAME → hostname FQDN → "Issabel".
+     * Ex.: pabx.cliente.exemplo:admin
      */
     public static function defaultIssuer()
     {
-        if (!empty($_SERVER['HTTP_HOST'])) {
-            $host = strtolower((string) $_SERVER['HTTP_HOST']);
-            $host = preg_replace('/:\d+$/', '', $host);
-            $host = trim($host, '[]');
-            if ($host !== '' && $host !== 'localhost' && $host !== 'localhost.localdomain') {
+        foreach (array(
+            isset($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : '',
+            isset($_SERVER['SERVER_NAME']) ? $_SERVER['SERVER_NAME'] : '',
+        ) as $raw) {
+            $host = self::normalizeHost($raw);
+            if ($host !== '') {
                 return $host;
             }
         }
+
         $hn = @gethostname();
-        if (is_string($hn)) {
-            $hn = strtolower(trim($hn));
-            if ($hn !== '' && $hn !== 'localhost' && $hn !== 'localhost.localdomain') {
-                return $hn;
-            }
+        $host = self::normalizeHost(is_string($hn) ? $hn : '');
+        if ($host !== '') {
+            return $host;
         }
+
+        $fqdn = '';
+        if (is_executable('/usr/bin/hostname')) {
+            $fqdn = @trim((string) shell_exec('/usr/bin/hostname -f 2>/dev/null'));
+        }
+        $host = self::normalizeHost($fqdn);
+        if ($host !== '') {
+            return $host;
+        }
+
         return 'Issabel';
+    }
+
+    /**
+     * Normaliza host/domínio do cliente (sem porta, sem localhost).
+     */
+    private static function normalizeHost($raw)
+    {
+        $host = strtolower(trim((string) $raw));
+        if ($host === '') {
+            return '';
+        }
+        $host = preg_replace('/:\d+$/', '', $host);
+        $host = trim($host, '[]');
+        if ($host === '' || $host === 'localhost' || $host === 'localhost.localdomain') {
+            return '';
+        }
+        // Ignora IP puro no label do Authenticator quando houver FQDN melhor depois
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return '';
+        }
+        return $host;
     }
 
     public static function otpAuthUri($secret, $account, $issuer = null)
