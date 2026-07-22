@@ -138,12 +138,28 @@ class paloUserPlugin_totp extends paloSantoUserPluginBase
         if (!class_exists('QRcode')) {
             return '';
         }
-        ob_start();
-        @QRcode::png($uri, false, QR_ECLEVEL_L, 4, 2);
-        $png = ob_get_clean();
-        if ($png === '' || $png === false) {
+        // NUNCA chamar QRcode::png(..., false) — isso envia Content-Type: image/png
+        // e o navegador renderiza a página inteira como imagem (tela preta).
+        $tmp = tempnam(sys_get_temp_dir(), 'isfqr');
+        if ($tmp === false) {
             return '';
         }
-        return 'data:image/png;base64,' . base64_encode($png);
+        $pngFile = $tmp . '.png';
+        @unlink($tmp);
+        try {
+            QRcode::png($uri, $pngFile, QR_ECLEVEL_L, 4, 2);
+            if (!is_file($pngFile)) {
+                return '';
+            }
+            $png = file_get_contents($pngFile);
+            @unlink($pngFile);
+            if ($png === false || $png === '') {
+                return '';
+            }
+            return 'data:image/png;base64,' . base64_encode($png);
+        } catch (Exception $e) {
+            @unlink($pngFile);
+            return '';
+        }
     }
 }
