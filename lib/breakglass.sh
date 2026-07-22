@@ -236,8 +236,9 @@ enroll_totp_user() {
   secret="$(php -r 'require "/opt/issabel-security-fix/php/breakglass/Totp.php"; echo IsfTotp::generateSecret();')"
   sqlite3 "$acl_db" "UPDATE acl_user SET twofactorsecret='$(echo "$secret" | sed "s/'/''/g")' WHERE name='$(echo "$user" | sed "s/'/''/g")';"
 
-  local uri
-  uri="$(php -r 'require "/opt/issabel-security-fix/php/breakglass/Totp.php"; echo IsfTotp::otpAuthUri($argv[1], $argv[2], "Issabel");' "$secret" "$user")"
+  local issuer uri
+  issuer="$(php -r 'require "/opt/issabel-security-fix/php/breakglass/Totp.php"; echo IsfTotp::defaultIssuer();')"
+  uri="$(php -r 'require "/opt/issabel-security-fix/php/breakglass/Totp.php"; echo IsfTotp::otpAuthUri($argv[1], $argv[2]);' "$secret" "$user")"
 
   # PNG para escanear (não imprime no terminal — abre no browser ou scp)
   local png="/tmp/isf-totp-${user}.png"
@@ -249,6 +250,7 @@ enroll_totp_user() {
 
   echo
   echo "=== TOTP gerado para: $user ==="
+  echo "Authenticator label: ${issuer}:${user}"
   echo
   echo "IMPORTANTE: o terminal NÃO pede código do Authenticator — ele só cria o segredo."
   echo "Você precisa ADICIONAR a conta no app e, se quiser, confirmar abaixo."
@@ -259,7 +261,7 @@ enroll_totp_user() {
   echo "--- Opção B: Google Authenticator (manual) ---"
   echo "  1) Abra o Google Authenticator"
   echo "  2) + → Inserir chave de configuração"
-  echo "  3) Conta: Issabel ($user)"
+  echo "  3) Conta: ${issuer} (${user})"
   echo "  4) Chave: $secret"
   echo "  5) Tipo: Baseada em tempo"
   echo

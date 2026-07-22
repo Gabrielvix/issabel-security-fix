@@ -41,7 +41,7 @@ class paloUserPlugin_totp extends paloSantoUserPluginBase
         $uri = '';
         $qrDataUri = '';
         if ($secret !== '') {
-            $uri = IsfTotp::otpAuthUri($secret, $username !== '' ? $username : 'user', 'Issabel');
+            $uri = IsfTotp::otpAuthUri($secret, $username !== '' ? $username : 'user');
             $qrDataUri = $this->_qrDataUri($uri);
         }
 

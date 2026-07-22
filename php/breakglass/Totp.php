@@ -49,8 +49,41 @@ class IsfTotp
         return false;
     }
 
-    public static function otpAuthUri($secret, $account, $issuer = 'Issabel')
+    /**
+     * Nome que aparece no Authenticator (issuer).
+     * Preferência: HTTP_HOST → hostname FQDN → "Issabel".
+     * Ex.: pabx.example.com:admin
+     */
+    public static function defaultIssuer()
     {
+        if (!empty($_SERVER['HTTP_HOST'])) {
+            $host = strtolower((string) $_SERVER['HTTP_HOST']);
+            $host = preg_replace('/:\d+$/', '', $host);
+            $host = trim($host, '[]');
+            if ($host !== '' && $host !== 'localhost' && $host !== 'localhost.localdomain') {
+                return $host;
+            }
+        }
+        $hn = @gethostname();
+        if (is_string($hn)) {
+            $hn = strtolower(trim($hn));
+            if ($hn !== '' && $hn !== 'localhost' && $hn !== 'localhost.localdomain') {
+                return $hn;
+            }
+        }
+        return 'Issabel';
+    }
+
+    public static function otpAuthUri($secret, $account, $issuer = null)
+    {
+        if ($issuer === null || $issuer === '') {
+            $issuer = self::defaultIssuer();
+        }
+        $account = trim((string) $account);
+        if ($account === '') {
+            $account = 'user';
+        }
+        // Label padrão Key URI: Issuer:account → Authenticator mostra domínio + usuário
         $label = rawurlencode($issuer . ':' . $account);
         $q = http_build_query(array(
             'secret' => $secret,
