@@ -31,6 +31,8 @@ source "${SCRIPT_DIR}/lib/ssl.sh"
 source "${SCRIPT_DIR}/lib/campaign.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/lib/breakglass.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/lib/time.sh"
 
 usage() {
   cat <<EOF
@@ -51,6 +53,8 @@ Uso:
   $0 --enroll-totp <user>   Gera TOTP (terminal) para usuário Issabel
   $0 --enable-breakglass    Marca ENABLED=1 (usar com --harden --apply)
   $0 --disable-breakglass   Marca ENABLED=0 e restaura bloqueio Apache total
+  $0 --fix-time [--dry-run|--apply]
+                            Ajusta timezone (opcional) + chrony/NTP (crítico para OTP)
   $0 --verify               Valida limpeza (engine, persistência, upload PHP)
   $0 --all [--dry-run|--apply]
                             scan + fix + harden (+ verify se --apply)
@@ -71,6 +75,7 @@ Arquivos de configuração:
   conf/webshell-paths.txt     Caminhos fixos de artefatos da campanha
   conf/extra-allow-ips.txt    IPs extras liberados na UI
   conf/breakglass.conf        OTP opcional (ENABLED=0 por padrão)
+  conf/time.conf              Timezone opcional + pools NTP (OTP)
 
 Camadas de mitigação (padrão):
   1) Apache: só IPs da whitelist acessam index.php, /admin, configs.php
@@ -90,7 +95,7 @@ IMPORTANTE:
   1) Rode --scan e --fix --dry-run primeiro.
   2) Bloqueie o C2 no firewall perimetral se possível.
   3) Após --harden --apply, teste /index.php e /admin do IP liberado.
-  4) Se usar --enable-breakglass: enroll TOTP ANTES (web ou terminal).
+  4) Se usar --enable-breakglass: enroll TOTP ANTES (web ou terminal) e garanta NTP (`--fix-time`).
   5) Troque senhas (root, Issabel, DB, SIP) e revise usuários UID 0.
 EOF
 }
@@ -100,6 +105,7 @@ DO_FIX=0
 DO_HARDEN=0
 DO_VERIFY=0
 DO_SSL=0
+DO_FIX_TIME=0
 DO_SHOW_WL=0
 DO_ALLOW_IP=""
 DO_DENY_IP=""
@@ -121,6 +127,7 @@ parse_args() {
       --harden) DO_HARDEN=1; MODE_SET=1; shift ;;
       --verify) DO_VERIFY=1; MODE_SET=1; shift ;;
       --fix-ssl) DO_SSL=1; MODE_SET=1; shift ;;
+      --fix-time) DO_FIX_TIME=1; MODE_SET=1; shift ;;
       --expire-breakglass) DO_EXPIRE_BG=1; MODE_SET=1; shift ;;
       --enable-breakglass) DO_BG_ENABLE=1; MODE_SET=1; shift ;;
       --disable-breakglass) DO_BG_ENABLE=0; MODE_SET=1; shift ;;
@@ -130,7 +137,7 @@ parse_args() {
         DO_ENROLL_USER="${1:-}"
         shift || true
         ;;
-      --all) DO_FIX=1; DO_HARDEN=1; DO_SCAN=1; DO_VERIFY=1; DO_SSL=1; MODE_SET=1; shift ;;
+      --all) DO_FIX=1; DO_HARDEN=1; DO_SCAN=1; DO_VERIFY=1; DO_SSL=1; DO_FIX_TIME=1; MODE_SET=1; shift ;;
       --show-whitelist) DO_SHOW_WL=1; MODE_SET=1; shift ;;
       --allow-ip)
         MODE_SET=1
@@ -223,6 +230,13 @@ main() {
     run_remediate
   fi
 
+  if [[ $DO_FIX_TIME -eq 1 ]]; then
+    if [[ $APPLY -eq 0 ]]; then
+      log WARN "fix-time em dry-run. Use --apply para sincronizar o relógio."
+    fi
+    harden_time_sync || log WARN "Sincronização de hora incompleta — OTP pode falhar"
+  fi
+
   if [[ $DO_SSL -eq 1 ]]; then
     if [[ $APPLY -eq 0 ]]; then
       log WARN "SSL em dry-run. Use --apply para emitir/renovar certificado."
@@ -233,6 +247,10 @@ main() {
   if [[ $DO_HARDEN -eq 1 ]]; then
     if [[ $APPLY -eq 0 ]]; then
       log WARN "Hardening em dry-run. Use --apply para gravar htaccess/apache."
+    fi
+    # Hora antes do OTP/breakglass no harden
+    if [[ $DO_FIX_TIME -eq 0 ]]; then
+      harden_time_sync || log WARN "Sincronização de hora incompleta — OTP pode falhar"
     fi
     run_harden
   fi

@@ -5,7 +5,7 @@
 set -o errtrace
 
 FIX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FIX_VERSION="1.6.2"
+FIX_VERSION="1.6.3"
 FIX_TS="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/issabel-security-fix/${FIX_TS}}"
 LOG_FILE="${LOG_FILE:-/var/log/issabel-security-fix.log}"

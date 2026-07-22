@@ -62,6 +62,7 @@ O plugin é instalado no `--harden` mesmo com break-glass desligado — cadastre
 
 - Fail2ban continua essencial (login público só no modo OTP)  
 - Não use break-glass sem TOTP cadastrado nos admins  
+- **Relógio:** TOTP exige NTP sincronizado — `--harden` / `--fix-time` ajusta chrony (`conf/time.conf`)  
 - Escape: `isf-allow-ip SEU.IP` ou SSH  
 - Desative (`--disable-breakglass`) se não precisar de acesso remoto fora da lista  
 - Add/remove no painel Security → Whitelist sincroniza Apache imediatamente (não depende do cron)  

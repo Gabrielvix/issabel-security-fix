@@ -236,6 +236,7 @@ run_scan() {
   scan_campaign_extras
   scan_webshells
   scan_defenses
+  scan_time
   log INFO "=== RESULTADO: ${FINDINGS} achados (${CRITICAL} críticos) ==="
   return 0
 }

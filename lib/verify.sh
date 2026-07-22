@@ -155,6 +155,10 @@ run_verify() {
     log WARN "drop-in upload security ausente"
   fi
 
+  if ! verify_time; then
+    failed=$((failed + 1))
+  fi
+
   if [[ $failed -gt 0 ]]; then
     log ERROR "=== VERIFY: $failed falha(s) ==="
     return 1

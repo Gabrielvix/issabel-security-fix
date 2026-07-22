@@ -33,7 +33,7 @@ Limpar só os PHP **não basta**. Este projeto corta C2, restaura o engine ofici
 | **5. Scan horário** | Cron detecta IoCs (engine, webshells, UID 0, C2) | Sempre |
 | **6. Engine limpo** | Restore do script oficial IssabelFoundation + verify pós-`amportal chown` | Sempre no `--fix` |
 | **7. C2 DROP** | `iptables` INPUT/OUTPUT para IPs em `conf/c2-blocklist.txt` | Sempre |
-| **8. Break-glass OTP** | Login+OTP fora da whitelist; libera IP por 10h; remove IP = logout + OTP de novo | **Opt-in** (`--enable-breakglass`) |
+| **9. Relógio / NTP** | chrony + fallbacks públicos (`conf/time.conf`) — OTP quebra com hora errada | No `--harden` / `--fix-time` / `--all` |
 
 O bloqueio Apache por whitelist é a **barreira principal**. O OTP é recurso **adicional** — quem não ativar mantém o modelo “só IP liberado entra”.
 
@@ -151,6 +151,7 @@ conf/webshell-names.txt     # nomes de drop
 conf/webshell-paths.txt     # caminhos fixos da campanha
 conf/extra-allow-ips.txt    # IPs extras no Apache
 conf/breakglass.conf        # ENABLED=0|1, TTL_HOURS=10
+conf/time.conf              # timezone opcional + pools NTP (OTP)
 conf/uid0-keep.txt          # usuários UID 0 permitidos (além de root)
 conf/acl-remove-users.txt   # logins Issabel (acl.db) a remover (ex.: atmin)
 ```
@@ -182,7 +183,7 @@ WEBROOT=/var/www/html
 
 ```text
 issabel-security-fix.sh
-lib/{common,scan,remediate,whitelist,harden,campaign,breakglass,verify,ssl}.sh
+lib/{common,scan,remediate,whitelist,harden,campaign,breakglass,verify,ssl,time}.sh
 php/breakglass/          # TOTP + política + hook de login
 templates/userlist-plugin-totp/   # UI System → Users
 conf/
