@@ -215,8 +215,6 @@ enroll_totp_user() {
     return 1
   fi
   local acl_db="/var/www/db/acl.db"
-  [[ -f "$acl_db" ]] || acl_db="$(php -r 'include "/var/www/html/configs/default.conf.php"; echo $arrConf["issabel_dsn"]["acl"];' 2>/dev/null | sed 's|.*sqlite3:///||;s|?.*||')"
-  # DSN normalmente sqlite3:////var/www/db/acl.db
   if [[ ! -f /var/www/db/acl.db ]]; then
     log ERROR "acl.db não encontrado"
     return 1
@@ -230,7 +228,6 @@ enroll_totp_user() {
     return 1
   fi
 
-  # Garante coluna
   if ! sqlite3 "$acl_db" "PRAGMA table_info(acl_user);" | grep -q twofactorsecret; then
     sqlite3 "$acl_db" "ALTER TABLE acl_user ADD twofactorsecret varchar(200) DEFAULT '';"
   fi
@@ -242,15 +239,67 @@ enroll_totp_user() {
   local uri
   uri="$(php -r 'require "/opt/issabel-security-fix/php/breakglass/Totp.php"; echo IsfTotp::otpAuthUri($argv[1], $argv[2], "Issabel");' "$secret" "$user")"
 
+  # PNG para escanear (não imprime no terminal — abre no browser ou scp)
+  local png="/tmp/isf-totp-${user}.png"
+  php -r '
+    require "/var/www/html/modules/sec_2fa/libs/phpqrcode.php";
+    if (!class_exists("QRcode")) { fwrite(STDERR, "phpqrcode ausente\n"); exit(1); }
+    QRcode::png($argv[1], $argv[2], QR_ECLEVEL_L, 6, 2);
+  ' "$uri" "$png" 2>/dev/null || png=""
+
   echo
-  echo "=== TOTP cadastrado para: $user ==="
+  echo "=== TOTP gerado para: $user ==="
+  echo
+  echo "IMPORTANTE: o terminal NÃO pede código do Authenticator — ele só cria o segredo."
+  echo "Você precisa ADICIONAR a conta no app e, se quiser, confirmar abaixo."
+  echo
+  echo "--- Opção A (recomendada): interface web ---"
+  echo "  System → Users → editar $user → Gerar novo TOTP → Salvar → escanear o QR na tela"
+  echo
+  echo "--- Opção B: Google Authenticator (manual) ---"
+  echo "  1) Abra o Google Authenticator"
+  echo "  2) + → Inserir chave de configuração"
+  echo "  3) Conta: Issabel ($user)"
+  echo "  4) Chave: $secret"
+  echo "  5) Tipo: Baseada em tempo"
+  echo
+  echo "--- Opção C: escanear QR em arquivo ---"
+  if [[ -n "$png" && -f "$png" ]]; then
+    echo "  Arquivo PNG: $png"
+    echo "  Copie para o PC (scp) ou: python3 -m http.server 8888 --directory /tmp"
+    echo "  e abra http://SERVIDOR:8888/$(basename "$png") (só na rede confiável)"
+  else
+    echo "  (PNG não gerado — use Opção A ou B)"
+  fi
+  if command -v qrencode >/dev/null 2>&1; then
+    echo
+    echo "--- QR ASCII (escaneável em alguns apps) ---"
+    qrencode -t ANSIUTF8 "$uri" || true
+  fi
+  echo
   echo "Secret (base32): $secret"
   echo "otpauth URI:     $uri"
   echo
-  echo "Escaneie no Google Authenticator / FreeOTP / Authy."
-  echo "Teste um código: php -r 'require \"/opt/issabel-security-fix/php/breakglass/Totp.php\"; echo IsfTotp::getCode(\"$secret\").PHP_EOL;'"
-  echo
-  log OK "Enrollment concluído"
+
+  # Confirmação opcional com código do app
+  if [[ -t 0 ]]; then
+    local code=""
+    read -r -p "Digite o código de 6 dígitos do Authenticator para confirmar (ou Enter para pular): " code || true
+    if [[ -n "$code" ]]; then
+      local ok
+      ok="$(php -r 'require "/opt/issabel-security-fix/php/breakglass/Totp.php"; echo IsfTotp::verify($argv[1], $argv[2]) ? "1" : "0";' "$secret" "$code")"
+      if [[ "$ok" == "1" ]]; then
+        log OK "Código válido — Authenticator sincronizado com $user"
+      else
+        log ERROR "Código inválido. Confira o relógio do celular e use o secret/QR desta execução (não um antigo)."
+        return 2
+      fi
+    else
+      log WARN "Confirmação pulada. Cadastre o secret no Authenticator antes de ativar --enable-breakglass."
+    fi
+  fi
+
+  log OK "Enrollment concluído para $user"
 }
 
 install_breakglass_cron() {
