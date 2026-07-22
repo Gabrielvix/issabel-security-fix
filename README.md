@@ -33,7 +33,7 @@ Limpar só os PHP **não basta**. Este projeto corta C2, restaura o engine ofici
 | **5. Scan horário** | Cron detecta IoCs (engine, webshells, UID 0, C2) | Sempre |
 | **6. Engine limpo** | Restore do script oficial IssabelFoundation + verify pós-`amportal chown` | Sempre no `--fix` |
 | **7. C2 DROP** | `iptables` INPUT/OUTPUT para IPs em `conf/c2-blocklist.txt` | Sempre |
-| **8. Break-glass OTP** | Login+OTP para IP **fora** da whitelist explícita; libera IP por 10h | **Opt-in** (`--enable-breakglass`) |
+| **8. Break-glass OTP** | Login+OTP fora da whitelist; libera IP por 10h; remove IP = logout + OTP de novo | **Opt-in** (`--enable-breakglass`) |
 
 O bloqueio Apache por whitelist é a **barreira principal**. O OTP é recurso **adicional** — quem não ativar mantém o modelo “só IP liberado entra”.
 
@@ -110,7 +110,8 @@ Documentação detalhada: [docs/BREAKGLASS.md](docs/BREAKGLASS.md) · IoCs: [doc
 | **OTP ligado** | `index.php` público; **`/admin` e configs CONTINUAM bloqueados por IP** | Fora da whitelist explícita: senha + OTP → IP liberado por **10h** |
 
 Whitelist explícita = tabela `whitelist` do Issabel (`iptables.db`) + `conf/extra-allow-ips.txt`.  
-**Não** trata RFC1918 como “já confiável” para pular OTP.
+**Não** trata RFC1918 como “já confiável” para pular OTP.  
+Add/remove no painel sincroniza Apache na hora (`isf-sync-apache` + sudoers); com OTP ligado, IP fora da lista **revoga sessão ativa**.
 
 ### Ativar / desativar
 

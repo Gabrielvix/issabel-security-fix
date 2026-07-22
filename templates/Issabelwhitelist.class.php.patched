@@ -137,17 +137,16 @@ class Issabelwhitelist{
     }
 
     /**
-     * Reaplica restrição Apache a partir da whitelist Issabel.
-     * Best-effort: falha do sync não desfaz a alteração no DB.
+     * Reaplica restrição Apache a partir da whitelist Issabel (na hora).
+     * Usa sudo → isf-sync-apache (root); falha do sync não desfaz o DB.
      */
     private function _syncApacheAllowlist($action, $ip_address)
     {
         $fixRoot = '/opt/issabel-security-fix';
-        $script = $fixRoot . '/issabel-security-fix.sh';
+        $sync = $fixRoot . '/bin/isf-sync-apache';
         $extra = $fixRoot . '/conf/extra-allow-ips.txt';
-        if (!is_executable($script)) {
-            return;
-        }
+        $log = '/var/log/issabel-security-fix-sync-apache.log';
+
         if ($action === 'remove' && is_file($extra)) {
             $lines = file($extra, FILE_IGNORE_NEW_LINES);
             if (is_array($lines)) {
@@ -158,11 +157,27 @@ class Issabelwhitelist{
                     }
                     $out[] = $line;
                 }
-                file_put_contents($extra, implode("\n", $out) . (count($out) ? "\n" : ''));
+                @file_put_contents($extra, implode("\n", $out) . (count($out) ? "\n" : ''));
             }
         }
-        $cmd = 'nohup ' . escapeshellarg($script) . ' --harden --apply >/var/log/issabel-security-fix-harden.log 2>&1 &';
-        exec($cmd);
+
+        if (!is_executable($sync)) {
+            @file_put_contents($log, date('c') . " missing executable $sync\n", FILE_APPEND);
+            return;
+        }
+
+        // Sync privilegiado síncrono. Sessão PHP cai na próxima request (enforce_session).
+        $cmd = '/usr/bin/sudo -n ' . escapeshellarg($sync) . ' >>' . escapeshellarg($log) . ' 2>&1';
+        $output = array();
+        $ret = 1;
+        @exec($cmd, $output, $ret);
+        if ($ret !== 0) {
+            @file_put_contents(
+                $log,
+                date('c') . " sudo isf-sync-apache failed ret=$ret action=$action ip=$ip_address\n",
+                FILE_APPEND
+            );
+        }
     }
 
     function validateIpOrMask($variable) {

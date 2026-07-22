@@ -148,14 +148,19 @@ class IsfBreakglassPolicy
             file_put_contents($extra, $ip . "\n", FILE_APPEND | LOCK_EX);
         }
 
-        // Sync Apache em background (não bloqueia login)
-        $script = '/opt/issabel-security-fix/issabel-security-fix.sh';
-        if (is_executable($script)) {
-            $cmd = 'nohup ' . escapeshellarg($script) . ' --harden --apply >/var/log/issabel-security-fix-breakglass.log 2>&1 &';
+        // Sync Apache na hora (sudo → isf-sync-apache). Asterisk não é root.
+        $sync = '/opt/issabel-security-fix/bin/isf-sync-apache';
+        $log = '/var/log/issabel-security-fix-sync-apache.log';
+        if (is_executable($sync)) {
+            $cmd = '/usr/bin/sudo -n ' . escapeshellarg($sync) . ' >>' . escapeshellarg($log) . ' 2>&1';
+            @exec($cmd);
+        } elseif (is_executable('/opt/issabel-security-fix/issabel-security-fix.sh')) {
+            $cmd = 'nohup /usr/bin/sudo -n /opt/issabel-security-fix/issabel-security-fix.sh --harden --apply >>'
+                . escapeshellarg($log) . ' 2>&1 &';
             @exec($cmd);
         }
-        if (is_executable('/usr/sbin/issabel-helper')) {
-            @exec('issabel-helper fwconfig --add_wl ' . escapeshellarg($ip) . ' >/dev/null 2>&1 &');
+        if (is_executable('/usr/sbin/issabel-helper') || is_executable('/usr/bin/issabel-helper')) {
+            @exec('/usr/bin/issabel-helper fwconfig --add_wl ' . escapeshellarg($ip) . ' >/dev/null 2>&1 &');
         }
 
         $this->audit("BREAKGLASS temp-whitelist ip=$ip user=$user expires=" . date('c', $expires));

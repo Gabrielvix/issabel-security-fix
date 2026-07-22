@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Regenera Restrict IP do Apache a partir da whitelist Issabel e recarrega httpd.
+# Destinado a ser chamado pelo painel (usuário asterisk) via sudo -n.
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+
+# shellcheck source=/dev/null
+source "${ROOT}/lib/common.sh"
+# shellcheck source=/dev/null
+source "${ROOT}/lib/whitelist.sh"
+# shellcheck source=/dev/null
+source "${ROOT}/lib/breakglass.sh"
+# shellcheck source=/dev/null
+source "${ROOT}/lib/harden.sh"
+
+require_root
+DRY_RUN=0
+APPLY=1
+LOG_FILE="${LOG_FILE:-/var/log/issabel-security-fix-sync-apache.log}"
+sync_apache_ip_restrict

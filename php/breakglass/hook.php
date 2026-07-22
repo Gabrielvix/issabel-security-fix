@@ -37,7 +37,8 @@ function isf_breakglass_handle($pACL, $smarty, $arrConf)
 
 /**
  * Se break-glass está ativo e o usuário está logado, o IP PRECISA estar
- * na whitelist explícita. Remover o IP = revoga a sessão na hora.
+ * na whitelist explícita. Remover o IP = revoga a sessão na hora e exige
+ * novo login + OTP (senha sozinha não basta fora da lista).
  */
 function isf_breakglass_enforce_session($arrConf)
 {
@@ -71,7 +72,7 @@ function isf_breakglass_enforce_session($arrConf)
     if (function_exists('writeLOG')) {
         writeLOG(
             'audit.log',
-            "LOGOUT $user: session revoked — IP $ip not on whitelist (break-glass)."
+            "LOGOUT $user: session revoked — IP $ip not on whitelist (break-glass). OTP required on next login."
         );
     }
 
@@ -79,9 +80,14 @@ function isf_breakglass_enforce_session($arrConf)
     if (session_status() === PHP_SESSION_ACTIVE) {
         @session_destroy();
     }
+    // Invalida cookie de sessão
+    if (ini_get('session.use_cookies')) {
+        $p = session_get_cookie_params();
+        @setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], !empty($p['secure']), !empty($p['httponly']));
+    }
     session_name('issabelSession');
     @session_start();
-    $_SESSION['isf_kick_msg'] = 'Seu IP foi removido da whitelist. Faça login novamente.';
+    $_SESSION['isf_kick_msg'] = 'Seu IP saiu da whitelist. Faça login novamente: senha + OTP obrigatórios.';
 
     header('Location: index.php');
     exit;

@@ -10,7 +10,8 @@ Recurso **opcional** do Issabel Security Fix. O padrão do harden é **Apache fe
 | Opt-in | `--enable-breakglass` |
 | Quem precisa de OTP | IP ∉ whitelist explícita (`iptables.db` + `extra-allow-ips.txt`) |
 | RFC1918 | **Não** isenta de OTP |
-| Após OTP OK | Sessão + IP na whitelist por `TTL_HOURS` (padrão **10**) |
+| Após OTP OK | Sessão + IP na whitelist por `TTL_HOURS` (padrão **10**) + sync Apache na hora |
+| Remover IP da whitelist | Apache bloqueia na hora + **sessão ativa revogada**; próximo login exige senha + OTP |
 | `/admin` | Sempre restrito por IP Apache (mesmo com OTP ligado) |
 | `index.php` | Público **somente** com OTP ligado |
 
@@ -54,7 +55,8 @@ O plugin é instalado no `--harden` mesmo com break-glass desligado — cadastre
 1. Usuário acessa `https://servidor/` (login)  
 2. Usuário + senha  
 3. Código OTP do autenticador  
-4. IP entra na whitelist por 10h (cron expira e re-sincroniza Apache)  
+4. IP entra na whitelist por 10h — **Apache sincroniza na hora** (`isf-sync-apache` via sudo)  
+5. Se o IP for **removido** da whitelist Issabel: sessão derrubada na próxima request; novo login exige senha + OTP  
 
 ## Segurança
 
@@ -62,3 +64,5 @@ O plugin é instalado no `--harden` mesmo com break-glass desligado — cadastre
 - Não use break-glass sem TOTP cadastrado nos admins  
 - Escape: `isf-allow-ip SEU.IP` ou SSH  
 - Desative (`--disable-breakglass`) se não precisar de acesso remoto fora da lista  
+- Add/remove no painel Security → Whitelist sincroniza Apache imediatamente (não depende do cron)  
+- Com break-glass ligado, **sessão ativa não basta**: a cada request o IP é checado na whitelist explícita  

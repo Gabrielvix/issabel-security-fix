@@ -1,0 +1,5 @@
+# sudoers — Issabel Security Fix
+# Permite ao asterisk sincronizar a allowlist Apache imediatamente
+# quando a whitelist Issabel muda (add/remove no painel) ou após OTP.
+asterisk ALL=(root) NOPASSWD: /opt/issabel-security-fix/bin/isf-sync-apache
+asterisk ALL=(root) NOPASSWD: /usr/local/sbin/isf-sync-apache

@@ -329,6 +329,43 @@ EOF
   fi
 }
 
+# Sync rápido só da allowlist Apache (add/remove whitelist Issabel).
+# Usado por bin/isf-sync-apache via sudo (asterisk → root).
+sync_apache_ip_restrict() {
+  log INFO "Sincronizando restrição Apache a partir da whitelist Issabel..."
+  local count
+  count="$(harden_collect_ips | wc -l)"
+  local min_ips=1
+  if [[ "$count" -lt "$min_ips" ]]; then
+    log ERROR "Whitelist resultante vazia ($count). Abortando sync para evitar lockout."
+    return 1
+  fi
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log INFO "[dry-run] sync Apache ($count IPs)"
+    return 0
+  fi
+
+  local tmp_ht tmp_ap
+  tmp_ht="$(mktemp)"
+  tmp_ap="$(mktemp)"
+  generate_admin_htaccess_v2 "$tmp_ht"
+  generate_apache_dropin "$tmp_ap"
+  backup_file "$HTACCESS_ADMIN"
+  backup_file "$APACHE_CONF_DROPIN"
+  install -o asterisk -g asterisk -m 0644 "$tmp_ht" "$HTACCESS_ADMIN"
+  install -o root -g root -m 0644 "$tmp_ap" "$APACHE_CONF_DROPIN"
+  rm -f "$tmp_ht" "$tmp_ap"
+
+  if apachectl configtest >/dev/null 2>&1; then
+    systemctl reload httpd >/dev/null 2>&1 || service httpd reload >/dev/null 2>&1 || true
+    log OK "Apache allowlist sincronizada ($count IPs) e recarregada"
+    return 0
+  fi
+  log ERROR "apachectl configtest FALHOU após sync allowlist"
+  return 1
+}
+
 harden_php_ini() {
   log INFO "Aplicando PHP security ini ($PHP_SECURITY_INI)..."
   local tmp
@@ -397,15 +434,45 @@ EOF
 
 
 install_cli_symlinks() {
-  log INFO "Instalando CLIs isf-allow-ip / isf-deny-ip..."
+  log INFO "Instalando CLIs isf-allow-ip / isf-deny-ip / isf-sync-apache..."
   if [[ $DRY_RUN -eq 1 ]]; then
     log INFO "[dry-run] ln -sfn bin/isf-* /usr/local/sbin/"
     return 0
   fi
-  chmod +x "${FIX_ROOT}/bin/isf-allow-ip" "${FIX_ROOT}/bin/isf-deny-ip" 2>/dev/null || true
+  chmod +x "${FIX_ROOT}/bin/isf-allow-ip" "${FIX_ROOT}/bin/isf-deny-ip" "${FIX_ROOT}/bin/isf-sync-apache" 2>/dev/null || true
   ln -sfn "${FIX_ROOT}/bin/isf-allow-ip" /usr/local/sbin/isf-allow-ip
   ln -sfn "${FIX_ROOT}/bin/isf-deny-ip" /usr/local/sbin/isf-deny-ip
-  log OK "CLIs: isf-allow-ip, isf-deny-ip"
+  ln -sfn "${FIX_ROOT}/bin/isf-sync-apache" /usr/local/sbin/isf-sync-apache
+  log OK "CLIs: isf-allow-ip, isf-deny-ip, isf-sync-apache"
+}
+
+install_sync_apache_sudoers() {
+  local src="${FIX_ROOT}/templates/sudoers-isf-sync-apache"
+  local dst="/etc/sudoers.d/issabel-security-fix"
+  log INFO "Instalando sudoers para sync Apache (asterisk → isf-sync-apache)..."
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log INFO "[dry-run] instalaria $dst"
+    return 0
+  fi
+  if [[ ! -f "$src" ]]; then
+    log WARN "Template sudoers ausente: $src"
+    return 0
+  fi
+  install -o root -g root -m 0440 "$src" "$dst"
+  if command -v visudo >/dev/null 2>&1 && ! visudo -cf "$dst" >/dev/null 2>&1; then
+    log ERROR "sudoers inválido — removendo $dst"
+    rm -f "$dst"
+    return 1
+  fi
+  # painel (asterisk) edita extra-allow ao remover IP; log do sync
+  touch /var/log/issabel-security-fix-sync-apache.log 2>/dev/null || true
+  chown root:asterisk /var/log/issabel-security-fix-sync-apache.log 2>/dev/null || true
+  chmod 664 /var/log/issabel-security-fix-sync-apache.log 2>/dev/null || true
+  mkdir -p "$(dirname "$EXTRA_ALLOW_FILE")"
+  touch "$EXTRA_ALLOW_FILE"
+  chown root:asterisk "$EXTRA_ALLOW_FILE" 2>/dev/null || true
+  chmod 664 "$EXTRA_ALLOW_FILE" 2>/dev/null || true
+  log OK "sudoers instalado: $dst"
 }
 
 install_whitelist_apache_hook() {
@@ -450,6 +517,7 @@ run_harden() {
   harden_php_ini
   harden_permissions
   install_cli_symlinks
+  install_sync_apache_sudoers
   install_whitelist_apache_hook
   if [[ "${INSTALL_CRONS:-1}" == "1" ]]; then
     install_whitelist_sync_cron
@@ -461,8 +529,9 @@ run_harden() {
   log OK "=== HARDENING concluído ==="
   log WARN "Teste o acesso ao /admin a partir de um IP liberado antes de sair da sessão SSH."
   log INFO "Nota: exec/system NÃO foram desabilitados no PHP global (Issabel depende disso). Contenção = engine off em uploads + IP no /admin."
+  log INFO "Whitelist Issabel: add/remove no painel sincroniza Apache na hora (isf-sync-apache via sudo)."
   if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
-    log WARN "Break-glass OTP ATIVO: index.php público para login; /admin bloqueado por whitelist; OTP fora da lista explícita; IP liberado por $(breakglass_ttl_hours)h após OTP."
+    log WARN "Break-glass OTP ATIVO: index.php público para login; /admin bloqueado por whitelist; OTP fora da lista explícita; IP liberado por $(breakglass_ttl_hours)h após OTP. Remover IP da whitelist revoga sessão ativa na hora."
   else
     log INFO "Break-glass OTP desativado — Apache bloqueia index.php e /admin por whitelist (máxima contenção)."
   fi
