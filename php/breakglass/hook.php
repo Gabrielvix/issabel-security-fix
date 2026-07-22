@@ -125,32 +125,73 @@ function isf_breakglass_verify_otp($pACL, $smarty, $policy)
     exit;
 }
 
+function isf_breakglass_resolve_theme()
+{
+    $theme = '';
+    if (function_exists('load_theme')) {
+        $theme = (string) load_theme('/var/www/html/');
+    }
+    if ($theme === '' && is_file('/var/www/db/settings.db')) {
+        $db = @new SQLite3('/var/www/db/settings.db', SQLITE3_OPEN_READONLY);
+        if ($db) {
+            $row = @$db->querySingle("SELECT value FROM settings WHERE key='theme'", true);
+            if (is_array($row) && !empty($row['value'])) {
+                $theme = (string) $row['value'];
+            } elseif (is_string($row) && $row !== '') {
+                $theme = $row;
+            }
+            $db->close();
+        }
+    }
+    if ($theme === '' || !is_dir('/var/www/html/themes/' . $theme)) {
+        $theme = is_dir('/var/www/html/themes/virtual') ? 'virtual' : 'tenant';
+    }
+    return $theme;
+}
+
 function isf_breakglass_render_otp($smarty, $error = '')
 {
     $sCurYear = date('Y');
     if ($sCurYear < '2013') {
         $sCurYear = '2013';
     }
+    $theme = isf_breakglass_resolve_theme();
+    $logoCandidates = array(
+        "/var/www/html/themes/{$theme}/images/issabel_logo_mini.png",
+        "/var/www/html/themes/{$theme}/images/logo.png",
+        '/var/www/html/themes/tenant/images/issabel_logo_mini.png',
+    );
+    $logoSrc = '';
+    foreach ($logoCandidates as $abs) {
+        if (is_file($abs)) {
+            $logoSrc = str_replace('/var/www/html/', '', $abs);
+            break;
+        }
+    }
+
     $tpl = '/opt/issabel-security-fix/php/breakglass/otp.tpl';
     $smarty->assign('currentyear', $sCurYear);
-    $smarty->assign('THEMENAME', 'tenant');
+    $smarty->assign('THEMENAME', $theme);
     $smarty->assign('WEBPATH', '');
+    $smarty->assign('LOGO_SRC', $logoSrc);
     $smarty->assign('SUBMIT', 'Verificar');
     $smarty->assign('PAGE_NAME', 'Verificação OTP (Break-glass)');
-    $smarty->assign('WELCOME', 'Seu IP não está na whitelist. Informe o código do autenticador.');
+    $smarty->assign('WELCOME', 'Seu IP não está na whitelist. Digite o código de 6 dígitos do Google Authenticator / FreeOTP / Authy.');
     $smarty->assign('CODE', 'Código OTP');
     $smarty->assign('OTP_ERROR', $error);
     $smarty->assign('ISSABEL_LICENSED', 'is licensed under');
-    $smarty->assign('LOGIN_COLOR_1', '#2c3e50');
-    $smarty->assign('LOGIN_COLOR_2', '#34495e');
+    $smarty->assign('LOGIN_COLOR_1', '#1b2838');
+    $smarty->assign('LOGIN_COLOR_2', '#0f1720');
     if (is_file($tpl)) {
         $smarty->display($tpl);
     } else {
-        echo '<html><body><form method="post"><h2>OTP</h2>';
+        echo '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>OTP</title></head><body>';
+        echo '<form method="post" action="index.php"><h2>Código OTP</h2>';
         if ($error) {
-            echo '<p style="color:red">' . htmlspecialchars($error) . '</p>';
+            echo '<p style="color:red">' . htmlspecialchars($error, ENT_QUOTES, 'UTF-8') . '</p>';
         }
-        echo '<input name="isf_otp_code" autocomplete="one-time-code"><button type="submit">OK</button></form></body></html>';
+        echo '<input name="isf_otp_code" autocomplete="one-time-code" autofocus required> '
+            . '<button type="submit">Verificar</button></form></body></html>';
     }
     die();
 }
