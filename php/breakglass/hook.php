@@ -134,19 +134,70 @@ function isf_breakglass_resolve_theme()
     if ($theme === '' && is_file('/var/www/db/settings.db')) {
         $db = @new SQLite3('/var/www/db/settings.db', SQLITE3_OPEN_READONLY);
         if ($db) {
-            $row = @$db->querySingle("SELECT value FROM settings WHERE key='theme'", true);
-            if (is_array($row) && !empty($row['value'])) {
-                $theme = (string) $row['value'];
-            } elseif (is_string($row) && $row !== '') {
-                $theme = $row;
+            $val = @$db->querySingle("SELECT value FROM settings WHERE key='theme'");
+            if (is_string($val) && $val !== '') {
+                $theme = $val;
             }
             $db->close();
         }
     }
     if ($theme === '' || !is_dir('/var/www/html/themes/' . $theme)) {
-        $theme = is_dir('/var/www/html/themes/virtual') ? 'virtual' : 'tenant';
+        $theme = is_dir('/var/www/html/themes/tenant') ? 'tenant' : 'virtual';
     }
     return $theme;
+}
+
+/**
+ * Monta template OTP a partir do login.tpl do tema (mesma identidade visual).
+ * Só substitui o <form> de usuário/senha pelo formulário de código.
+ */
+function isf_breakglass_otp_form_snippet()
+{
+    return <<<'TPL'
+			<p class="isf-otp-hint" style="text-align:center;margin:0 0 16px;opacity:0.9;">{$WELCOME}</p>
+			<form method="post" action="index.php" autocomplete="off">
+				<div class="form-group">
+					<div class="input-group">
+						<div class="input-group-addon">
+							<i class="entypo-key"></i>
+						</div>
+						<input type="text" class="form-control" name="isf_otp_code" id="isf_otp_code"
+						       placeholder="{$CODE}" inputmode="numeric" pattern="[0-9]*" maxlength="8"
+						       autocomplete="one-time-code" autofocus />
+					</div>
+				</div>
+				<div class="form-group">
+					<button type="submit" class="btn btn-primary btn-block btn-login" name="isf_otp_submit" value="1">
+						<i class="entypo-login"></i>
+						{$SUBMIT}
+					</button>
+				</div>
+			</form>
+			<p style="text-align:center;margin-top:12px;">
+				<a href="index.php" style="text-decoration:none;opacity:0.85;">{$BACK_LOGIN}</a>
+			</p>
+TPL;
+}
+
+function isf_breakglass_build_theme_otp_tpl($loginTplPath)
+{
+    $src = @file_get_contents($loginTplPath);
+    if ($src === false || $src === '') {
+        return false;
+    }
+
+    // Garante formulário visível mesmo se neon-login.js falhar
+    if (strpos($src, 'login-form-fall-init') === false) {
+        $src = preg_replace('/\blogin-form-fall\b/', 'login-form-fall login-form-fall-init', $src, 1);
+    }
+
+    $otpForm = isf_breakglass_otp_form_snippet();
+    $count = 0;
+    $out = preg_replace('/<form\b[^>]*>.*?<\/form>/is', $otpForm, $src, 1, $count);
+    if ($count < 1 || !is_string($out)) {
+        return false;
+    }
+    return $out;
 }
 
 function isf_breakglass_render_otp($smarty, $error = '')
@@ -156,42 +207,84 @@ function isf_breakglass_render_otp($smarty, $error = '')
         $sCurYear = '2013';
     }
     $theme = isf_breakglass_resolve_theme();
-    $logoCandidates = array(
-        "/var/www/html/themes/{$theme}/images/issabel_logo_mini.png",
-        "/var/www/html/themes/{$theme}/images/logo.png",
-        '/var/www/html/themes/tenant/images/issabel_logo_mini.png',
-    );
-    $logoSrc = '';
-    foreach ($logoCandidates as $abs) {
-        if (is_file($abs)) {
-            $logoSrc = str_replace('/var/www/html/', '', $abs);
-            break;
+    $webroot = '/var/www/html';
+    $loginTpl = "{$webroot}/themes/{$theme}/_common/login.tpl";
+
+    // jQuery / HEAD libs — mesmo caminho do login e do 2FA nativo
+    if (class_exists('paloSantoNavigation')) {
+        $oPn = new paloSantoNavigation(array(), $smarty);
+        if (method_exists($oPn, 'putHEAD_JQUERY_HTML')) {
+            $oPn->putHEAD_JQUERY_HTML();
         }
     }
 
-    $tpl = '/opt/issabel-security-fix/php/breakglass/otp.tpl';
+    $submit = function_exists('_tr') ? _tr('Submit') : 'Verificar';
+    $pageName = function_exists('_tr') ? _tr('Two Factor Authentication') : 'Verificação OTP (Break-glass)';
+    $codeLbl = function_exists('_tr') ? _tr('Code') : 'Código OTP';
+    $welcome = 'Seu IP não está na whitelist. Digite o código de 6 dígitos do autenticador.';
+    $back = function_exists('_tr') ? _tr('Back') : 'Voltar ao login';
+    if ($back === 'Back') {
+        $back = 'Voltar ao login';
+    }
+
     $smarty->assign('currentyear', $sCurYear);
     $smarty->assign('THEMENAME', $theme);
     $smarty->assign('WEBPATH', '');
-    $smarty->assign('LOGO_SRC', $logoSrc);
-    $smarty->assign('SUBMIT', 'Verificar');
-    $smarty->assign('PAGE_NAME', 'Verificação OTP (Break-glass)');
-    $smarty->assign('WELCOME', 'Seu IP não está na whitelist. Digite o código de 6 dígitos do Google Authenticator / FreeOTP / Authy.');
-    $smarty->assign('CODE', 'Código OTP');
+    $smarty->assign('SUBMIT', $submit);
+    $smarty->assign('PAGE_NAME', $pageName . ' (Break-glass)');
+    $smarty->assign('WELCOME', $welcome);
+    $smarty->assign('CODE', $codeLbl);
     $smarty->assign('OTP_ERROR', $error);
-    $smarty->assign('ISSABEL_LICENSED', 'is licensed under');
-    $smarty->assign('LOGIN_COLOR_1', '#1b2838');
-    $smarty->assign('LOGIN_COLOR_2', '#0f1720');
-    if (is_file($tpl)) {
-        $smarty->display($tpl);
-    } else {
-        echo '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>OTP</title></head><body>';
-        echo '<form method="post" action="index.php"><h2>Código OTP</h2>';
-        if ($error) {
-            echo '<p style="color:red">' . htmlspecialchars($error, ENT_QUOTES, 'UTF-8') . '</p>';
+    $smarty->assign('LOGIN_INCORRECT', $error);
+    $smarty->assign('BACK_LOGIN', $back);
+    $smarty->assign('USERNAME', function_exists('_tr') ? _tr('Username') : 'Username');
+    $smarty->assign('PASSWORD', function_exists('_tr') ? _tr('Password') : 'Password');
+    $smarty->assign('ISSABEL_LICENSED', function_exists('_tr') ? _tr('is licensed under') : 'is licensed under');
+    $smarty->assign('LOGIN_COLOR_1', '#2c3e50');
+    $smarty->assign('LOGIN_COLOR_2', '#34495e');
+
+    $rendered = false;
+    if (is_file($loginTpl)) {
+        $built = isf_breakglass_build_theme_otp_tpl($loginTpl);
+        if (is_string($built) && $built !== '') {
+            $cacheDir = $webroot . '/templates_c';
+            if (!is_dir($cacheDir)) {
+                @mkdir($cacheDir, 0755, true);
+            }
+            $cacheFile = $cacheDir . '/isf_breakglass_otp_' . preg_replace('/[^a-zA-Z0-9_-]/', '', $theme) . '.tpl';
+            if (@file_put_contents($cacheFile, $built) !== false) {
+                $smarty->display($cacheFile);
+                $rendered = true;
+            }
         }
-        echo '<input name="isf_otp_code" autocomplete="one-time-code" autofocus required> '
-            . '<button type="submit">Verificar</button></form></body></html>';
+    }
+
+    if (!$rendered) {
+        // Fallback genérico (tema sem login.tpl padrão)
+        $tpl = '/opt/issabel-security-fix/php/breakglass/otp.tpl';
+        $logoSrc = '';
+        foreach (array(
+            "{$webroot}/themes/{$theme}/images/issabel_logo_mini.png",
+            "{$webroot}/themes/{$theme}/images/logo.png",
+            "{$webroot}/images/logo.png",
+        ) as $abs) {
+            if (is_file($abs)) {
+                $logoSrc = ltrim(str_replace($webroot, '', $abs), '/');
+                break;
+            }
+        }
+        $smarty->assign('LOGO_SRC', $logoSrc);
+        if (is_file($tpl)) {
+            $smarty->display($tpl);
+        } else {
+            echo '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>OTP</title></head><body>';
+            echo '<form method="post" action="index.php"><h2>Código OTP</h2>';
+            if ($error) {
+                echo '<p style="color:red">' . htmlspecialchars($error, ENT_QUOTES, 'UTF-8') . '</p>';
+            }
+            echo '<input name="isf_otp_code" autocomplete="one-time-code" autofocus required> '
+                . '<button type="submit">Verificar</button></form></body></html>';
+        }
     }
     die();
 }
