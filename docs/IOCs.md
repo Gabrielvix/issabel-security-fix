@@ -5,7 +5,8 @@ Campanha observada em Issabel/FreePBX-like:
 ## Indicadores
 
 - C2: `212.83.160.70` (`/r/postroot.sh`, `/t/cmd.txt`, `/r/setuid`, `/r/searchshells.sh`)
-- Usuário: `abort` UID 0, home `/dev/null`
+- Usuário Linux: `abort` / `yuki` UID 0
+- Login Issabel (acl.db): `atmin` (typosquat de `admin`, grupo administrator)
 - SSH comment: `t3rr0r@private`
 - Binário: `/usr/sbin/setuid` (SUID → `/bin/sh`)
 - Engine: `/var/lib/asterisk/bin/issabelpbx_engine` substituído

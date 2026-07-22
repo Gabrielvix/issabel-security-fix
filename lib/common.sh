@@ -5,7 +5,7 @@
 set -o errtrace
 
 FIX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FIX_VERSION="1.6.0"
+FIX_VERSION="1.6.1"
 FIX_TS="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/issabel-security-fix/${FIX_TS}}"
 LOG_FILE="${LOG_FILE:-/var/log/issabel-security-fix.log}"
@@ -15,6 +15,7 @@ WEBROOT="${WEBROOT:-/var/www/html}"
 ENGINE_PATH="${ENGINE_PATH:-/var/lib/asterisk/bin/issabelpbx_engine}"
 ENGINE_URL="${ENGINE_URL:-https://raw.githubusercontent.com/IssabelFoundation/issabelPBX/master/framework/amp_conf/bin/issabelpbx_engine}"
 IPTABLES_DB="${IPTABLES_DB:-/var/www/db/iptables.db}"
+ACL_DB="${ACL_DB:-/var/www/db/acl.db}"
 RC_LOCAL="${RC_LOCAL:-/etc/rc.local}"
 SETUID_BIN="${SETUID_BIN:-/usr/sbin/setuid}"
 STARTUP_D="${STARTUP_D:-/etc/asterisk/startup.d}"
@@ -24,6 +25,7 @@ WEBSHELL_MD5="${FIX_ROOT}/conf/webshell-md5.txt"
 WEBSHELL_NAMES="${FIX_ROOT}/conf/webshell-names.txt"
 EXTRA_ALLOW_FILE="${FIX_ROOT}/conf/extra-allow-ips.txt"
 UID0_KEEP_FILE="${FIX_ROOT}/conf/uid0-keep.txt"
+ACL_REMOVE_USERS="${FIX_ROOT}/conf/acl-remove-users.txt"
 
 DRY_RUN=1
 APPLY=0
@@ -161,6 +163,37 @@ uid0_is_kept() {
   [[ "$user" == "root" ]] && return 0
   [[ -f "$UID0_KEEP_FILE" ]] || return 1
   grep -qxF "$user" "$UID0_KEEP_FILE" 2>/dev/null
+}
+
+# Nomes de login Issabel (acl.db) que nunca removemos automaticamente
+acl_user_is_protected() {
+  local name="$1"
+  case "$name" in
+    admin|root) return 0 ;;
+  esac
+  return 1
+}
+
+acl_remove_list() {
+  [[ -f "$ACL_REMOVE_USERS" ]] || return 0
+  local name
+  while IFS= read -r name || [[ -n "$name" ]]; do
+    name="${name%%#*}"
+    name="$(echo "$name" | tr -d '[:space:]')"
+    [[ -n "$name" ]] || continue
+    acl_user_is_protected "$name" && continue
+    [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || continue
+    printf '%s\n' "$name"
+  done <"$ACL_REMOVE_USERS"
+}
+
+acl_user_exists() {
+  local name="$1"
+  [[ -f "$ACL_DB" ]] || return 1
+  command -v sqlite3 >/dev/null 2>&1 || return 1
+  local id
+  id="$(sqlite3 "$ACL_DB" "SELECT id FROM acl_user WHERE name='${name//\'/\'\'}' LIMIT 1;" 2>/dev/null)"
+  [[ -n "$id" ]]
 }
 
 php_looks_like_webshell() {

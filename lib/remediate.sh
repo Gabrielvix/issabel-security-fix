@@ -101,6 +101,65 @@ remediate_uid0_extras() {
 # compat: nome antigo
 remediate_abort_user() { remediate_uid0_extras; }
 
+remediate_acl_users() {
+  log INFO "Removendo logins Issabel de atacante (acl.db)..."
+  [[ -f "$ACL_DB" ]] || { log INFO "acl.db ausente — pulando"; return 0; }
+  if ! command -v sqlite3 >/dev/null 2>&1; then
+    log WARN "sqlite3 ausente — não removeu logins acl.db"
+    return 0
+  fi
+
+  local name id esc
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    acl_user_is_protected "$name" && continue
+    esc="${name//\'/\'\'}"
+    id="$(sqlite3 "$ACL_DB" "SELECT id FROM acl_user WHERE name='${esc}' LIMIT 1;" 2>/dev/null || true)"
+    if [[ -z "$id" ]]; then
+      # ainda assim remove conta Linux homônima se existir
+      if getent passwd "$name" >/dev/null 2>&1; then
+        if [[ $DRY_RUN -eq 1 ]]; then
+          log INFO "[dry-run] removeria usuário Linux: $name"
+        else
+          userdel -rf "$name" 2>/dev/null || userdel -f "$name" 2>/dev/null || true
+          getent passwd "$name" >/dev/null 2>&1 || log OK "Usuário Linux removido: $name"
+        fi
+      fi
+      continue
+    fi
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+      log INFO "[dry-run] removeria login Issabel acl.db: $name (id=$id)"
+      continue
+    fi
+
+    backup_file "$ACL_DB"
+    sqlite3 "$ACL_DB" <<SQL
+BEGIN;
+DELETE FROM acl_membership WHERE id_user=${id};
+DELETE FROM acl_user_permission WHERE id_user=${id};
+DELETE FROM acl_user_shortcut WHERE id_user=${id};
+DELETE FROM sticky_note WHERE id_user=${id};
+DELETE FROM acl_notification WHERE id_user=${id};
+DELETE FROM acl_module_user_permissions WHERE id_user=${id};
+DELETE FROM acl_profile_properties WHERE id_profile IN (SELECT id_profile FROM acl_user_profile WHERE id_user=${id});
+DELETE FROM acl_user_profile WHERE id_user=${id};
+DELETE FROM acl_user WHERE id=${id};
+COMMIT;
+SQL
+    if acl_user_exists "$name"; then
+      log ERROR "Falha ao remover login Issabel: $name"
+    else
+      log OK "Login Issabel removido: $name (acl.db id=$id)"
+    fi
+
+    if getent passwd "$name" >/dev/null 2>&1; then
+      userdel -rf "$name" 2>/dev/null || userdel -f "$name" 2>/dev/null || true
+      getent passwd "$name" >/dev/null 2>&1 || log OK "Usuário Linux homônimo removido: $name"
+    fi
+  done < <(acl_remove_list)
+}
+
 remediate_ssh_keys() {
   local f
   for f in /root/.ssh/authorized_keys /home/asterisk/.ssh/authorized_keys; do
@@ -361,6 +420,7 @@ run_remediate() {
   remediate_profiles
   remediate_setuid
   remediate_uid0_extras
+  remediate_acl_users
   remediate_ssh_keys
   remediate_tmp_drops
   remediate_webshells

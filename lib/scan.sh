@@ -74,6 +74,27 @@ scan_users() {
   done < /etc/passwd || true
 }
 
+scan_acl_users() {
+  log INFO "Analisando logins Issabel (acl.db) suspeitos..."
+  [[ -f "$ACL_DB" ]] || { log INFO "acl.db ausente — pulando"; return 0; }
+  if ! command -v sqlite3 >/dev/null 2>&1; then
+    log WARN "sqlite3 ausente — não foi possível varrer acl.db"
+    return 0
+  fi
+  local name
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    if acl_user_exists "$name"; then
+      log CRITICAL "Login Issabel de atacante presente: $name (acl.db)"
+      inc_finding critical
+    fi
+    if getent passwd "$name" >/dev/null 2>&1; then
+      log CRITICAL "Usuário Linux com nome de backdoor Issabel: $name"
+      inc_finding critical
+    fi
+  done < <(acl_remove_list)
+}
+
 scan_ssh_keys() {
   log INFO "Analisando authorized_keys (marcador t3rr0r)..."
   local f
@@ -208,6 +229,7 @@ run_scan() {
   scan_rclocal
   scan_setuid
   scan_users
+  scan_acl_users
   scan_ssh_keys
   scan_crontabs
   scan_shell_profiles

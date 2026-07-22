@@ -1,0 +1,4 @@
+# Logins Issabel (tabela acl_user em /var/www/db/acl.db) a remover no --fix.
+# Tipicamente contas criadas pelo atacante (typosquatting de admin, etc.).
+# admin e root são sempre protegidos e nunca removidos por esta lista.
+atmin

@@ -14,7 +14,7 @@ O ataque observado não era só “um PHP malicioso”. A cadeia típica:
 
 1. Webshell na webroot (`Ultimatex.php`, `configs.php` ofuscados, `phpversions.php`, etc.)
 2. Persistência em cron / `rc.local` / `startup.d/postroot.sh` baixando `curl|bash` do C2
-3. Usuário `abort` (UID 0), binário `/usr/sbin/setuid`, chave SSH `t3rr0r@private`
+3. Usuário `abort` (UID 0), login Issabel `atmin`, binário `/usr/sbin/setuid`, chave SSH `t3rr0r@private`
 4. **`issabelpbx_engine` trocado** — cada `amportal` reinstalava o malware
 5. Dialplan fraudulento (`thanku-outcall`) e toll fraud SIP
 
@@ -47,6 +47,7 @@ O bloqueio Apache por whitelist é a **barreira principal**. O OTP é recurso **
 | `/etc/rc.local` com `curl\|bash` | Limpa IoCs |
 | Crontabs root/asterisk/apache + `/etc/cron*` | Remove linhas C2/postroot |
 | Usuário `abort` / UID 0 extras | Remove (`conf/uid0-keep.txt`) |
+| Login Issabel `atmin` (e lista) | Remove de `acl.db` (`conf/acl-remove-users.txt`) |
 | `/usr/sbin/setuid` | Quarentena |
 | SSH `t3rr0r@private` | Remove de authorized_keys |
 | Webshells (nomes, MD5, ofuscação) | Quarentena + stub 403 imutável |
@@ -150,6 +151,7 @@ conf/webshell-paths.txt     # caminhos fixos da campanha
 conf/extra-allow-ips.txt    # IPs extras no Apache
 conf/breakglass.conf        # ENABLED=0|1, TTL_HOURS=10
 conf/uid0-keep.txt          # usuários UID 0 permitidos (além de root)
+conf/acl-remove-users.txt   # logins Issabel (acl.db) a remover (ex.: atmin)
 ```
 
 Variáveis úteis:

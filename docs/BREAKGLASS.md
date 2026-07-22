@@ -33,7 +33,6 @@ Recurso **opcional** do Issabel Security Fix. O padrão do harden é **Apache fe
 
 ```bash
 isf-enroll-totp admin
-isf-enroll-totp atmin
 ```
 
 Mostra secret base32 + URI `otpauth://` para Google Authenticator / FreeOTP / Authy.

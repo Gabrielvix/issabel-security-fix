@@ -46,6 +46,19 @@ run_verify() {
     log OK "somente UID 0 autorizados presentes"
   fi
 
+  local acl_bad=0 acl_name
+  while IFS= read -r acl_name; do
+    [[ -n "$acl_name" ]] || continue
+    if acl_user_exists "$acl_name"; then
+      log ERROR "VERIFY FAIL: login Issabel de atacante ainda presente: $acl_name"
+      failed=$((failed + 1))
+      acl_bad=1
+    fi
+  done < <(acl_remove_list)
+  if [[ $acl_bad -eq 0 ]]; then
+    log OK "logins Issabel da lista acl-remove-users ausentes"
+  fi
+
   if grep -q 't3rr0r@private' /root/.ssh/authorized_keys /home/asterisk/.ssh/authorized_keys 2>/dev/null; then
     log ERROR "VERIFY FAIL: chave t3rr0r presente"
     failed=$((failed + 1))
