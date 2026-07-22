@@ -1,126 +1,200 @@
 # Issabel Security Fix
 
-Script de **remediação** e **hardening** para servidores Issabel comprometidos pela campanha de webshell + backdoor `abort` + infecção do `issabelpbx_engine` (C2 `212.83.160.70`).
+Toolkit de **remediação** + **hardening** para servidores Issabel atingidos pela campanha de webshell + backdoor `abort` + `issabelpbx_engine` infectado (C2 `212.83.160.70`).
 
-> Não substitui rebuild completo em incidentes graves. Use como contenção rápida + endurecimento, depois audite e troque credenciais.
+> Contenção rápida e endurecimento contínuo — **não substitui** rebuild completo após rootkit. Troque credenciais e audite CDR após o incidente.
 
-## O que corrige
+**Versão atual: 1.6.0** · Repositório: [Gabrielvix/issabel-security-fix](https://github.com/Gabrielvix/issabel-security-fix)
 
-| Persistência | Ação |
+---
+
+## Por que este fix existe
+
+O ataque observado não era só “um PHP malicioso”. A cadeia típica:
+
+1. Webshell na webroot (`Ultimatex.php`, `configs.php` ofuscados, `phpversions.php`, etc.)
+2. Persistência em cron / `rc.local` / `startup.d/postroot.sh` baixando `curl|bash` do C2
+3. Usuário `abort` (UID 0), binário `/usr/sbin/setuid`, chave SSH `t3rr0r@private`
+4. **`issabelpbx_engine` trocado** — cada `amportal` reinstalava o malware
+5. Dialplan fraudulento (`thanku-outcall`) e toll fraud SIP
+
+Limpar só os PHP **não basta**. Este projeto corta C2, restaura o engine oficial, remove persistência, endurece Apache e (opcionalmente) adiciona OTP break-glass.
+
+---
+
+## Camadas de mitigação (o que impede reinfecção)
+
+| Camada | O que faz | Padrão |
+|--------|-----------|--------|
+| **1. Apache por IP** | Só IPs da whitelist Issabel (+ fail2ban ignoreip + extras) acessam `index.php`, `/admin`, `configs.php`, `rest.php` | **Sempre ligado** no `--harden` |
+| **2. Redes locais** | Em modo clássico, libera RFC1918 + localhost (LAN) | Ligado (modo clássico) |
+| **3. PHP em uploads** | Engine off + deny em `cache/`, `images/`, `tmp/`, `_cache/`, etc. | Sempre |
+| **4. Fail2ban + firewall** | Reinicia fail2ban, remove `firewall.disable`, tenta `amportal firewall` | Sempre no `--fix` |
+| **5. Scan horário** | Cron detecta IoCs (engine, webshells, UID 0, C2) | Sempre |
+| **6. Engine limpo** | Restore do script oficial IssabelFoundation + verify pós-`amportal chown` | Sempre no `--fix` |
+| **7. C2 DROP** | `iptables` INPUT/OUTPUT para IPs em `conf/c2-blocklist.txt` | Sempre |
+| **8. Break-glass OTP** | Login+OTP para IP **fora** da whitelist explícita; libera IP por 10h | **Opt-in** (`--enable-breakglass`) |
+
+O bloqueio Apache por whitelist é a **barreira principal**. O OTP é recurso **adicional** — quem não ativar mantém o modelo “só IP liberado entra”.
+
+---
+
+## O que a remediação (`--fix`) remove
+
+| Persistência / IoC | Ação |
 |---|---|
-| `/var/lib/asterisk/bin/issabelpbx_engine` infectado | Quarentena + restore do engine oficial IssabelFoundation |
-| `/etc/rc.local` com `curl \| bash` | Remove IoCs |
-| Crontabs root/asterisk (postroot / cmd.txt) | Limpa linhas maliciosas |
-| Usuário `abort` / outros UID 0 não listados em `conf/uid0-keep.txt` | Remove (mantém `root`) |
-| `/usr/sbin/setuid` SUID | Quarentena |
-| SSH `t3rr0r@private` | Remove da authorized_keys |
-| Webshells (`Ultimatex.php`, `S!n4.php`, tokien/Yuki, MD5 conhecido, ofuscação) | Quarentena + stub 403 imutável no path |
-| `/etc/asterisk/startup.d/postroot.sh` | Quarentena |
-| Dialplan (`thanku-outcall`, C2 em `extensions_custom.conf`) | Remove linhas + `dialplan reload` |
-| `admin/modules/freepbx_ha/license.php`, `rest_phones/ajax.php` | Quarentena (lista `conf/webshell-paths.txt`) |
-| Processos `curl`/PHP ligados ao C2 | `pkill` nos padrões conhecidos |
-| Crons em `/etc/crontab`, `/etc/cron.d/*`, usuário `apache` | Limpa IoCs |
-| Fail2ban parado / firewall.disable | Reinicia fail2ban (socket) + `amportal firewall` + `fwconfig` |
-| C2 na blocklist | `iptables` DROP |
+| `issabelpbx_engine` infectado | Quarentena + restore oficial |
+| `/etc/rc.local` com `curl\|bash` | Limpa IoCs |
+| Crontabs root/asterisk/apache + `/etc/cron*` | Remove linhas C2/postroot |
+| Usuário `abort` / UID 0 extras | Remove (`conf/uid0-keep.txt`) |
+| `/usr/sbin/setuid` | Quarentena |
+| SSH `t3rr0r@private` | Remove de authorized_keys |
+| Webshells (nomes, MD5, ofuscação) | Quarentena + stub 403 imutável |
+| Paths fixos (`freepbx_ha/license.php`, …) | Quarentena |
+| `startup.d/postroot.sh` | Quarentena |
+| Dialplan `thanku-outcall` / C2 | Limpa + `dialplan reload` |
+| Processos ligados ao C2 | `pkill` |
+| Fail2ban / firewall.disable | Restaura defesas |
+| C2 blocklist | `iptables` DROP |
 
-## Hardening incluso
-
-1. Lê a **whitelist do Issabel** em `/var/www/db/iptables.db` (módulo Security → Whitelist)
-2. Une com `fail2ban ignoreip`, IP da sessão SSH atual e `conf/extra-allow-ips.txt`
-3. **Modo clássico:** libera redes locais `10/8`, `172.16/12`, `192.168/16`, localhost
-4. **Break-glass OTP (v1.5):** se `conf/breakglass.conf` `ENABLED=1`, `index.php` fica público; OTP obrigatório fora da whitelist **explícita** (sem auto-RFC1918); após OTP o IP entra na whitelist por **10h**. Ver [docs/BREAKGLASS.md](docs/BREAKGLASS.md)
-5. Restringe por IP `/admin` e entrypoints sensíveis
-6. Drop-in Apache + bloqueio de PHP em dirs de cache/upload
-7. Cron de re-scan + sync whitelist (+ expire break-glass)
-
-### Liberar IP pelo terminal (se ficou bloqueado)
-
-```bash
-isf-allow-ip 203.0.113.50
-# ou
-/opt/issabel-security-fix/issabel-security-fix.sh --allow-ip 203.0.113.50 "VPN"
-```
-
-## Requisitos
-
-- Root
-- Issabel 4/5 (Rocky/CentOS 7–8+)
-- Apache 2.4, `sqlite3`, `curl`
-- Saída HTTPS para restaurar o engine (GitHub) **ou** arquivo local em `vendor/issabelpbx_engine.clean`
+---
 
 ## Uso rápido
 
 ```bash
-cd /opt/issabel-security-fix   # ou clone do repositório
+cd /opt/issabel-security-fix   # ou: git clone …
 chmod +x issabel-security-fix.sh
 
 # 1) Diagnóstico
 ./issabel-security-fix.sh --scan
 
-# 2) Simular limpeza
+# 2) Limpeza (simular → aplicar)
 ./issabel-security-fix.sh --fix --dry-run
-
-# 3) Aplicar limpeza
 ./issabel-security-fix.sh --fix --apply
 
-# 4) Ver IPs que serão liberados no /admin
-./issabel-security-fix.sh --show-whitelist
-
-# 5) Endurecer admin (htaccess + apache)
+# 3) Hardening Apache (bloqueio por IP) — SEM abrir login público
 ./issabel-security-fix.sh --harden --apply
 
-# Tudo de uma vez
+# 4) (OPCIONAL) Ativar Break-glass OTP
+./issabel-security-fix.sh --enable-breakglass
+# equivalente:
+./issabel-security-fix.sh --harden --apply --enable-breakglass
+
+# Tudo de uma vez (fix + harden; OTP só se passar --enable-breakglass)
 ./issabel-security-fix.sh --all --apply
+./issabel-security-fix.sh --all --apply --enable-breakglass
 ```
+
+### Liberar / bloquear IP (escape de lockout)
+
+```bash
+isf-allow-ip 203.0.113.50 "VPN"
+isf-deny-ip 203.0.113.50
+# ou
+./issabel-security-fix.sh --allow-ip 203.0.113.50 "VPN"
+./issabel-security-fix.sh --show-whitelist
+```
+
+---
+
+## Break-glass OTP (opcional)
+
+Documentação detalhada: [docs/BREAKGLASS.md](docs/BREAKGLASS.md) · IoCs: [docs/IOCs.md](docs/IOCs.md)
+
+### Comportamento
+
+| Situação | Apache | Login |
+|----------|--------|-------|
+| **OTP desligado** (padrão) | `index.php` + `/admin` + configs só para whitelist | Só quem já está liberado |
+| **OTP ligado** | `index.php` público; **`/admin` e configs CONTINUAM bloqueados por IP** | Fora da whitelist explícita: senha + OTP → IP liberado por **10h** |
+
+Whitelist explícita = tabela `whitelist` do Issabel (`iptables.db`) + `conf/extra-allow-ips.txt`.  
+**Não** trata RFC1918 como “já confiável” para pular OTP.
+
+### Ativar / desativar
+
+```bash
+# Ativar (grava conf + reaplica Apache)
+./issabel-security-fix.sh --enable-breakglass
+
+# Desativar (volta bloqueio total no Apache)
+./issabel-security-fix.sh --disable-breakglass
+```
+
+### Cadastrar TOTP
+
+**Terminal:**
+
+```bash
+isf-enroll-totp admin
+# ou
+./issabel-security-fix.sh --enroll-totp admin
+```
+
+**Interface web (intuitivo):**  
+[System → Users → editar usuário](https://pabx.example.com/index.php?menu=userlist&action=edit&id_user=1) → seção **Autenticação em dois fatores (TOTP)** → Gerar novo TOTP → Salvar → escanear QR no autenticador.
+
+O plugin é instalado no `--harden` mesmo com OTP desligado, para você cadastrar tokens **antes** de ativar o break-glass.
+
+---
 
 ## Configuração
 
-Edite antes do harden:
-
 ```text
-conf/extra-allow-ips.txt   # IPs/CIDRs extras do time
-conf/c2-blocklist.txt      # C2 adicionais
-conf/webshell-md5.txt      # hashes conhecidos
-conf/webshell-names.txt    # nomes de drop
-conf/webshell-paths.txt    # caminhos fixos (ex.: license.php falsa)
+conf/c2-blocklist.txt       # IPs C2
+conf/webshell-md5.txt       # hashes conhecidos
+conf/webshell-names.txt     # nomes de drop
+conf/webshell-paths.txt     # caminhos fixos da campanha
+conf/extra-allow-ips.txt    # IPs extras no Apache
+conf/breakglass.conf        # ENABLED=0|1, TTL_HOURS=10
+conf/uid0-keep.txt          # usuários UID 0 permitidos (além de root)
 ```
 
-Variáveis de ambiente:
+Variáveis úteis:
 
 ```bash
-RESTRICT_MAIN_UI=1   # restringe também /var/www/html inteiro (pode quebrar provisionamento de ramais)
-INSTALL_CRONS=0      # não instala crons
+INSTALL_CRONS=0   # não instalar crons
 WEBROOT=/var/www/html
 ```
 
-## Segurança operacional (ordem recomendada)
+---
 
-1. Isolar o host / bloquear `212.83.160.70` no perímetro
-2. `--scan` → `--fix --dry-run` → `--fix --apply`
-3. Conferir que `issabelpbx_engine` voltou a ser o script legítimo
-4. `--show-whitelist` e garantir que **seu IP** está na lista
-5. `--harden --apply` e testar `https://servidor/admin`
-6. Trocar senhas (root, painel, MySQL, SIP/AMI)
-7. Conferir UID 0: só `root` (ou nomes em `conf/uid0-keep.txt`)
-8. Preferir rebuild se a confiança no host for baixa
+## Ordem operacional recomendada
+
+1. Isolar host / bloquear `212.83.160.70` no perímetro  
+2. `--scan` → `--fix --dry-run` → `--fix --apply`  
+3. Conferir engine limpo + `--verify`  
+4. `--show-whitelist` e garantir **seu IP**  
+5. `--harden --apply` (Apache fechado)  
+6. (Opcional) cadastrar TOTP na web/terminal → `--enable-breakglass`  
+7. Trocar senhas (root, painel, MySQL, SIP/AMI)  
+8. Auditar CDR / `extensions_custom.conf`  
+9. Preferir rebuild se a confiança no host for baixa  
+
+---
 
 ## Estrutura
 
 ```text
 issabel-security-fix.sh
-lib/{common,scan,remediate,whitelist,harden,campaign,verify,ssl}.sh
+lib/{common,scan,remediate,whitelist,harden,campaign,breakglass,verify,ssl}.sh
+php/breakglass/          # TOTP + política + hook de login
+templates/userlist-plugin-totp/   # UI System → Users
 conf/
-templates/
 docs/
-quarantine/          # artefatos removidos (gitignored)
+bin/isf-allow-ip  isf-deny-ip  isf-enroll-totp
+quarantine/              # artefatos removidos (gitignored)
 ```
+
+---
 
 ## Limitações
 
-- Não reverte todas as alterações possíveis de um rootkit
-- Não reescreve todo o dialplan Asterisk nem audita CDR/fraude de chamadas (só remove IoCs conhecidos em `extensions_custom.conf`)
-- Restore do engine depende de rede até o GitHub (ou vendor local)
-- Restringir `/admin` por IP não protege SIP/AMI — mantenha firewall Issabel + Fail2ban
+- Não reverte todo rootkit possível  
+- Dialplan: remove IoCs conhecidos; não audita CDR automaticamente  
+- Restore do engine precisa de GitHub ou `vendor/issabelpbx_engine.clean`  
+- Break-glass abre só o login (`index.php`); SIP/AMI continuam responsabilidade do firewall Issabel  
+- Preferir reinstalação limpa após compromisso root prolongado  
 
 ## Licença
 

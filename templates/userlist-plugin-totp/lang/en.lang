@@ -1,0 +1,21 @@
+<?php
+$arrLangPlugin = array(
+    'TOTP' => 'TOTP',
+    'Configured' => 'Configured',
+    'Not configured' => 'Not configured',
+    'Two-Factor Authentication (TOTP)' => 'Two-Factor Authentication (TOTP)',
+    'Required for login from IPs outside the Issabel whitelist when Break-glass OTP is enabled. Scan the QR with Google Authenticator, FreeOTP or Authy.' =>
+        'Required for login from IPs outside the Issabel whitelist when Break-glass OTP is enabled. Scan the QR with Google Authenticator, FreeOTP or Authy.',
+    'Status' => 'Status',
+    'Secret (base32)' => 'Secret (base32)',
+    'otpauth URI' => 'otpauth URI',
+    'Generate new TOTP' => 'Generate new TOTP',
+    'Remove TOTP' => 'Remove TOTP',
+    'Keep current TOTP' => 'Keep current TOTP',
+    'Break-glass OTP is ENABLED on this server.' => 'Break-glass OTP is ENABLED on this server.',
+    'Break-glass OTP is DISABLED (Apache IP lock only). You can still enroll TOTP now for later use.' =>
+        'Break-glass OTP is DISABLED (Apache IP lock only). You can still enroll TOTP now for later use.',
+    'Failed to save TOTP secret' => 'Failed to save TOTP secret',
+    'Failed to remove TOTP secret' => 'Failed to remove TOTP secret',
+);
+?>

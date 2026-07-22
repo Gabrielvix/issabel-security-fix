@@ -455,13 +455,15 @@ run_harden() {
     install_whitelist_sync_cron
     install_integrity_cron
   fi
-  if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
+  if declare -F run_breakglass_install >/dev/null 2>&1; then
     run_breakglass_install
   fi
   log OK "=== HARDENING concluído ==="
   log WARN "Teste o acesso ao /admin a partir de um IP liberado antes de sair da sessão SSH."
   log INFO "Nota: exec/system NÃO foram desabilitados no PHP global (Issabel depende disso). Contenção = engine off em uploads + IP no /admin."
   if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
-    log WARN "Break-glass OTP ATIVO: index.php público; OTP fora da whitelist explícita; IP liberado por $(breakglass_ttl_hours)h após OTP."
+    log WARN "Break-glass OTP ATIVO: index.php público para login; /admin bloqueado por whitelist; OTP fora da lista explícita; IP liberado por $(breakglass_ttl_hours)h após OTP."
+  else
+    log INFO "Break-glass OTP desativado — Apache bloqueia index.php e /admin por whitelist (máxima contenção)."
   fi
 }

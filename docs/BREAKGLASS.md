@@ -1,47 +1,65 @@
 # Break-glass OTP
 
+Recurso **opcional** do Issabel Security Fix. O padrão do harden é **Apache fechado por whitelist** (máxima contenção). O OTP é um “quebra-vidro” para acesso remoto sem abrir `/admin` para a internet.
+
 ## Política
 
-- **Whitelist explícita** = tabela `whitelist` em `/var/www/db/iptables.db` + `conf/extra-allow-ips.txt`
-- **Não** trata redes privadas (RFC1918) como confiáveis para pular OTP
-- IP **fora** dessa lista → após senha correta, **OTP obrigatório**
-- Após OTP OK → sessão Issabel + IP na whitelist por **10 horas** (configurável)
-- Cron a cada 15 min remove entradas expiradas e re-sincroniza o Apache
+| Item | Valor |
+|------|--------|
+| Padrão | `ENABLED=0` — sem login público |
+| Opt-in | `--enable-breakglass` |
+| Quem precisa de OTP | IP ∉ whitelist explícita (`iptables.db` + `extra-allow-ips.txt`) |
+| RFC1918 | **Não** isenta de OTP |
+| Após OTP OK | Sessão + IP na whitelist por `TTL_HOURS` (padrão **10**) |
+| `/admin` | Sempre restrito por IP Apache (mesmo com OTP ligado) |
+| `index.php` | Público **somente** com OTP ligado |
 
-## Ativar
+## Ativar / desativar
 
-1. Edite `conf/breakglass.conf` (`ENABLED=1`, `TTL_HOURS=10`)
-2. Cadastre TOTP **antes** de sair do IP confiável:
+```bash
+# Ativa e reaplica Apache
+./issabel-security-fix.sh --enable-breakglass
+
+# Desativa e volta bloqueio total (index.php + /admin na whitelist)
+./issabel-security-fix.sh --disable-breakglass
+
+# Ou edite conf/breakglass.conf e:
+./issabel-security-fix.sh --harden --apply
+```
+
+## Cadastrar TOTP
+
+### Terminal
 
 ```bash
 isf-enroll-totp admin
-# ou
-./issabel-security-fix.sh --enroll-totp admin
+isf-enroll-totp atmin
 ```
 
-3. Aplique harden:
+Mostra secret base32 + URI `otpauth://` para Google Authenticator / FreeOTP / Authy.
 
-```bash
-./issabel-security-fix.sh --harden --apply
-```
+### Interface web
 
-## Fluxo do usuário remoto
+1. Entre com um IP já na whitelist  
+2. Abra **System → Users** (ex.: `index.php?menu=userlist&action=edit&id_user=1`)  
+3. Na seção **Autenticação em dois fatores (TOTP)**:
+   - escolha **Gerar novo TOTP**
+   - **Salvar**
+   - escaneie o QR exibido  
+4. Repita para cada administrador  
 
-1. Acessa `https://servidor/` (index.php liberado no Apache)
-2. Login + senha
-3. Tela OTP (app autenticador)
-4. IP liberado por 10h em `/admin` e demais endpoints
+O plugin é instalado no `--harden` mesmo com break-glass desligado — cadastre tokens **antes** de ativar.
 
-## Desativar
+## Fluxo remoto (OTP ligado)
 
-```bash
-# conf/breakglass.conf
-ENABLED=0
-./issabel-security-fix.sh --harden --apply
-```
+1. Usuário acessa `https://servidor/` (login)  
+2. Usuário + senha  
+3. Código OTP do autenticador  
+4. IP entra na whitelist por 10h (cron expira e re-sincroniza Apache)  
 
 ## Segurança
 
-- Fail2ban continua essencial (login público)
-- Não cadastre TOTP só via web sem IP confiável
-- Escape: `isf-allow-ip SEU.IP` ou SSH
+- Fail2ban continua essencial (login público só no modo OTP)  
+- Não use break-glass sem TOTP cadastrado nos admins  
+- Escape: `isf-allow-ip SEU.IP` ou SSH  
+- Desative (`--disable-breakglass`) se não precisar de acesso remoto fora da lista  

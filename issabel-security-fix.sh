@@ -48,7 +48,9 @@ Uso:
                             Regenera Let's Encrypt (conf/ssl-domains.txt) e atualiza Apache
   $0 --expire-breakglass [--apply]
                             Remove IPs temporários break-glass expirados e re-sincroniza Apache
-  $0 --enroll-totp <user>   Gera TOTP (Google Authenticator) para usuário Issabel
+  $0 --enroll-totp <user>   Gera TOTP (terminal) para usuário Issabel
+  $0 --enable-breakglass    Marca ENABLED=1 (usar com --harden --apply)
+  $0 --disable-breakglass   Marca ENABLED=0 e restaura bloqueio Apache total
   $0 --verify               Valida limpeza (engine, persistência, upload PHP)
   $0 --all [--dry-run|--apply]
                             scan + fix + harden (+ verify se --apply)
@@ -59,6 +61,8 @@ Flags:
   --dry-run     Mostra ações sem alterar o sistema (padrão se --apply omitido)
   --apply       Aplica alterações (cria backup em ${BACKUP_DIR%/*}/)
   -v            Verbose
+  --enable-breakglass / --disable-breakglass
+                Opt-in do OTP break-glass (padrão = DESLIGADO = Apache fecha tudo)
 
 Arquivos de configuração:
   conf/c2-blocklist.txt       IPs C2 para bloquear
@@ -66,26 +70,27 @@ Arquivos de configuração:
   conf/webshell-names.txt     Nomes de arquivos suspeitos
   conf/webshell-paths.txt     Caminhos fixos de artefatos da campanha
   conf/extra-allow-ips.txt    IPs extras liberados na UI
-  conf/breakglass.conf        OTP fora da whitelist explícita (TTL 10h)
+  conf/breakglass.conf        OTP opcional (ENABLED=0 por padrão)
 
-Break-glass OTP (ENABLED=1 em conf/breakglass.conf):
-  - IP ∉ whitelist Issabel → senha + OTP obrigatórios
-  - Após OTP OK → sessão + IP na whitelist por TTL_HOURS (padrão 10h)
-  - Cadastro: isf-enroll-totp admin
-  - index.php fica público; /admin e configs.php seguem whitelist (sem auto-RFC1918)
+Camadas de mitigação (padrão):
+  1) Apache: só IPs da whitelist acessam index.php, /admin, configs.php
+  2) Fail2ban + firewall Issabel
+  3) PHP desligado em uploads/cache
+  4) Scan horário de IoCs + restore do engine limpo
+  5) OPCIONAL --enable-breakglass: login+OTP para IP fora da lista; /admin segue bloqueado
 
-Sempre liberado no Apache (modo clássico, breakglass OFF):
-  10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, localhost
+Cadastro TOTP (com ou sem break-glass):
+  Terminal:  isf-enroll-totp admin
+  Web:       System → Users → editar usuário → seção TOTP
 
 Escape se ficou fora da whitelist:
   $0 --allow-ip SEU.IP.PUBLICO
-  # ou: /opt/issabel-security-fix/bin/isf-allow-ip SEU.IP.PUBLICO
 
 IMPORTANTE:
   1) Rode --scan e --fix --dry-run primeiro.
   2) Bloqueie o C2 no firewall perimetral se possível.
   3) Após --harden --apply, teste /index.php e /admin do IP liberado.
-  4) Com breakglass: enroll TOTP ANTES de sair do IP confiável.
+  4) Se usar --enable-breakglass: enroll TOTP ANTES (web ou terminal).
   5) Troque senhas (root, Issabel, DB, SIP) e revise usuários UID 0.
 EOF
 }
@@ -100,6 +105,7 @@ DO_ALLOW_IP=""
 DO_DENY_IP=""
 DO_EXPIRE_BG=0
 DO_ENROLL_USER=""
+DO_BG_ENABLE=""
 ALLOW_NOTE=""
 MODE_SET=0
 
@@ -116,6 +122,8 @@ parse_args() {
       --verify) DO_VERIFY=1; MODE_SET=1; shift ;;
       --fix-ssl) DO_SSL=1; MODE_SET=1; shift ;;
       --expire-breakglass) DO_EXPIRE_BG=1; MODE_SET=1; shift ;;
+      --enable-breakglass) DO_BG_ENABLE=1; MODE_SET=1; shift ;;
+      --disable-breakglass) DO_BG_ENABLE=0; MODE_SET=1; shift ;;
       --enroll-totp)
         MODE_SET=1
         shift
@@ -156,6 +164,19 @@ main() {
   ensure_dirs
 
   log INFO "Issabel Security Fix v${FIX_VERSION} | host=$(hostname) | dry-run=$DRY_RUN"
+
+  if [[ -n "$DO_BG_ENABLE" ]]; then
+    set_breakglass_enabled "$DO_BG_ENABLE"
+    # Se só passou --enable/--disable sem harden, aplica harden automaticamente com --apply
+    if [[ $DO_HARDEN -eq 0 && $DO_FIX -eq 0 && $DO_SCAN -eq 0 && $DO_VERIFY -eq 0 && $DO_EXPIRE_BG -eq 0 && -z "$DO_ENROLL_USER" ]]; then
+      DO_HARDEN=1
+      if [[ $APPLY -eq 0 && $DRY_RUN -eq 1 ]]; then
+        # se veio só --enable-breakglass, aplica de verdade
+        DRY_RUN=0
+        APPLY=1
+      fi
+    fi
+  fi
 
   if [[ -n "$DO_ENROLL_USER" ]]; then
     enroll_totp_user "$DO_ENROLL_USER"

@@ -290,17 +290,68 @@ EOF
   log OK "CLI: isf-enroll-totp"
 }
 
-run_breakglass_install() {
-  log INFO "=== BREAKGLASS OTP (enabled=$(breakglass_enabled && echo yes || echo no)) ==="
-  if ! breakglass_enabled; then
-    log INFO "breakglass.conf ENABLED=0 — pulando install (só expire/CLI disponíveis)"
+install_totp_userlist_plugin() {
+  local src="${FIX_ROOT}/templates/userlist-plugin-totp"
+  local dst="${WEBROOT}/modules/userlist/plugins/totp"
+  log INFO "Instalando plugin TOTP em userlist (tela de usuários)..."
+  if [[ ! -d "$src" ]]; then
+    log WARN "Template do plugin TOTP ausente: $src"
     return 0
   fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log INFO "[dry-run] instalaria plugin em $dst"
+    return 0
+  fi
+  mkdir -p "$dst/tpl" "$dst/lang"
+  install -o asterisk -g asterisk -m 0644 "$src/index.php" "$dst/index.php"
+  install -o asterisk -g asterisk -m 0644 "$src/tpl/new_totp.tpl" "$dst/tpl/new_totp.tpl"
+  install -o asterisk -g asterisk -m 0644 "$src/lang/en.lang" "$dst/lang/en.lang"
+  install -o asterisk -g asterisk -m 0644 "$src/lang/br.lang" "$dst/lang/br.lang"
+  # pt-br alias se Issabel carregar pt-br
+  install -o asterisk -g asterisk -m 0644 "$src/lang/br.lang" "$dst/lang/pt-br.lang"
+  log OK "Plugin userlist/totp instalado — edite usuários em System → Users"
+}
+
+set_breakglass_enabled() {
+  local want="${1:-0}"
+  local conf="$BREAKGLASS_CONF"
+  mkdir -p "$(dirname "$conf")"
+  if [[ ! -f "$conf" ]]; then
+    cat >"$conf" <<EOF
+ENABLED=${want}
+TTL_HOURS=10
+TEMP_WHITELIST=1
+NOTE_PREFIX=isf-breakglass
+EOF
+  else
+    if grep -qE '^[[:space:]]*ENABLED[[:space:]]*=' "$conf"; then
+      sed -i "s/^[[:space:]]*ENABLED[[:space:]]*=.*/ENABLED=${want}/" "$conf"
+    else
+      echo "ENABLED=${want}" >>"$conf"
+    fi
+  fi
+  log OK "breakglass.conf ENABLED=${want}"
+}
+
+run_breakglass_install() {
+  log INFO "=== BREAKGLASS OTP (enabled=$(breakglass_enabled && echo yes || echo no)) ==="
+  # Plugin de UI sempre (cadastro TOTP na tela de usuários), mesmo com ENABLED=0
   install_breakglass_php
+  install_totp_userlist_plugin
+  install_breakglass_cli
+
+  if ! breakglass_enabled; then
+    log INFO "Break-glass DESATIVADO — Apache permanece com bloqueio total por whitelist (recomendado)."
+    log INFO "Para ativar depois: $0 --harden --apply --enable-breakglass"
+    # Remove patch gate se existir? Melhor deixar patch inerte (policy checks ENABLED)
+    # Ainda assim patchar index para OTP submit funcionar quando ativar sem re-patch
+    patch_index_php_breakglass || true
+    return 0
+  fi
+
   patch_index_php_breakglass
   install_breakglass_cron
-  install_breakglass_cli
-  log OK "=== BREAKGLASS instalado (TTL=$(breakglass_ttl_hours)h) ==="
-  log WARN "Cadastre TOTP dos admins: isf-enroll-totp admin"
-  log WARN "IPs fora da whitelist explícita precisarão de senha + OTP; após OK, IP entra por $(breakglass_ttl_hours)h."
+  log OK "=== BREAKGLASS ATIVO (TTL=$(breakglass_ttl_hours)h) ==="
+  log WARN "Cadastre TOTP: isf-enroll-totp admin  OU  System → Users → editar usuário"
+  log WARN "index.php público para login+OTP; /admin e configs.php CONTINUAM bloqueados por IP."
 }
