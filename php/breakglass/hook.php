@@ -36,6 +36,58 @@ function isf_breakglass_handle($pACL, $smarty, $arrConf)
 }
 
 /**
+ * Se break-glass está ativo e o usuário está logado, o IP PRECISA estar
+ * na whitelist explícita. Remover o IP = revoga a sessão na hora.
+ */
+function isf_breakglass_enforce_session($arrConf)
+{
+    if (empty($_SESSION['issabel_user'])) {
+        return;
+    }
+    // Fluxo OTP em andamento (ainda sem issabel_user final) — não misturar
+    if (isset($_POST['isf_otp_code'])) {
+        return;
+    }
+
+    $root = '/opt/issabel-security-fix';
+    require_once $root . '/php/breakglass/Policy.php';
+
+    $iptablesDb = isset($arrConf['issabel_dbdir'])
+        ? rtrim($arrConf['issabel_dbdir'], '/') . '/iptables.db'
+        : '/var/www/db/iptables.db';
+    $policy = new IsfBreakglassPolicy($root . '/conf/breakglass.conf', $iptablesDb);
+
+    if (!$policy->isEnabled()) {
+        return;
+    }
+    if ($policy->isExplicitlyWhitelisted()) {
+        return;
+    }
+
+    $user = (string) $_SESSION['issabel_user'];
+    $ip = $policy->clientIp();
+    $policy->audit("BREAKGLASS session-revoke user=$user ip=$ip reason=not-whitelisted");
+
+    if (function_exists('writeLOG')) {
+        writeLOG(
+            'audit.log',
+            "LOGOUT $user: session revoked — IP $ip not on whitelist (break-glass)."
+        );
+    }
+
+    $_SESSION = array();
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        @session_destroy();
+    }
+    session_name('issabelSession');
+    @session_start();
+    $_SESSION['isf_kick_msg'] = 'Seu IP foi removido da whitelist. Faça login novamente.';
+
+    header('Location: index.php');
+    exit;
+}
+
+/**
  * Chamado pelo patch de index.php logo após authenticateUser OK.
  * Se IP não está na whitelist explícita, força OTP e encerra.
  *

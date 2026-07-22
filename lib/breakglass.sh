@@ -33,31 +33,8 @@ install_breakglass_php() {
   log OK "PHP break-glass instalado"
 }
 
-patch_index_php_breakglass() {
-  log INFO "Aplicando hook break-glass em index.php ..."
-  if [[ ! -f "$INDEX_PHP" ]]; then
-    log ERROR "index.php ausente: $INDEX_PHP"
-    return 1
-  fi
-  if grep -q 'issabel-security-fix breakglass' "$INDEX_PHP" 2>/dev/null; then
-    log OK "Hook breakglass já presente em index.php"
-    return 0
-  fi
-  if [[ $DRY_RUN -eq 1 ]]; then
-    log INFO "[dry-run] inseriria marcadores breakglass em $INDEX_PHP"
-    return 0
-  fi
-  backup_file "$INDEX_PHP"
-
-  # 1) Include + handle OTP submit (após $pACL / $smarty)
-  local marker_load='// Two Factor Authentication Check'
-  if ! grep -qF "$marker_load" "$INDEX_PHP"; then
-    log ERROR "Marcador de 2FA não encontrado em index.php — patch manual necessário"
-    return 1
-  fi
-
-  local load_block
-  load_block="$(cat <<'PHP'
+breakglass_index_load_block() {
+  cat <<'PHP'
 // BEGIN issabel-security-fix breakglass
 if (file_exists('/opt/issabel-security-fix/php/breakglass/hook.php')) {
     require_once '/opt/issabel-security-fix/php/breakglass/hook.php';
@@ -70,13 +47,76 @@ if (file_exists('/opt/issabel-security-fix/php/breakglass/hook.php')) {
             isf_breakglass_verify_otp($pACL, $smarty, $isfBgPolicy);
         }
     }
+    // Sessão só vale enquanto o IP estiver na whitelist (remove IP = logout na hora)
+    if (function_exists('isf_breakglass_enforce_session')) {
+        isf_breakglass_enforce_session($arrConf);
+    }
+    if (!empty($_SESSION['isf_kick_msg'])) {
+        $smarty->assign('LOGIN_INCORRECT', $_SESSION['isf_kick_msg']);
+        unset($_SESSION['isf_kick_msg']);
+    }
 }
 // END issabel-security-fix breakglass
 
 PHP
-)"
+}
 
-  # Insert before Two Factor Authentication Check
+patch_index_php_breakglass() {
+  log INFO "Aplicando hook break-glass em index.php ..."
+  if [[ ! -f "$INDEX_PHP" ]]; then
+    log ERROR "index.php ausente: $INDEX_PHP"
+    return 1
+  fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log INFO "[dry-run] inseriria/atualizaria marcadores breakglass em $INDEX_PHP"
+    return 0
+  fi
+
+  local load_block
+  load_block="$(breakglass_index_load_block)"
+
+  # Já patchado: atualiza o bloco BEGIN/END se faltar enforce de sessão
+  if grep -q 'issabel-security-fix breakglass' "$INDEX_PHP" 2>/dev/null; then
+    if grep -q 'isf_breakglass_enforce_session' "$INDEX_PHP" 2>/dev/null; then
+      log OK "Hook breakglass já presente em index.php (com session-enforce)"
+      return 0
+    fi
+    backup_file "$INDEX_PHP"
+    local tmp
+    tmp="$(mktemp)"
+    awk -v block="$load_block" '
+      BEGIN { skip=0 }
+      /\/\/ BEGIN issabel-security-fix breakglass$/ {
+        print block
+        skip=1
+        next
+      }
+      /\/\/ END issabel-security-fix breakglass$/ {
+        skip=0
+        next
+      }
+      skip==0 { print }
+    ' "$INDEX_PHP" >"$tmp"
+    mv -f "$tmp" "$INDEX_PHP"
+    chown asterisk:asterisk "$INDEX_PHP"
+    chmod 644 "$INDEX_PHP"
+    if grep -q 'isf_breakglass_enforce_session' "$INDEX_PHP"; then
+      log OK "index.php atualizado (session-enforce breakglass)"
+      return 0
+    fi
+    log ERROR "Falha ao atualizar bloco breakglass em index.php"
+    return 1
+  fi
+
+  backup_file "$INDEX_PHP"
+
+  # 1) Include + OTP + session-enforce (após $pACL / $smarty)
+  local marker_load='// Two Factor Authentication Check'
+  if ! grep -qF "$marker_load" "$INDEX_PHP"; then
+    log ERROR "Marcador de 2FA não encontrado em index.php — patch manual necessário"
+    return 1
+  fi
+
   local tmp
   tmp="$(mktemp)"
   awk -v block="$load_block" '
