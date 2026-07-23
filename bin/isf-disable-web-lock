@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Desativa bloqueio Apache por IP (web aberta)
+set -euo pipefail
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+exec "${ROOT}/issabel-security-fix.sh" --disable-web-lock

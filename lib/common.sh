@@ -5,7 +5,7 @@
 set -o errtrace
 
 FIX_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FIX_VERSION="1.6.3"
+FIX_VERSION="1.6.4"
 FIX_TS="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/issabel-security-fix/${FIX_TS}}"
 LOG_FILE="${LOG_FILE:-/var/log/issabel-security-fix.log}"
@@ -29,6 +29,7 @@ ACL_REMOVE_USERS="${FIX_ROOT}/conf/acl-remove-users.txt"
 
 DRY_RUN=1
 APPLY=0
+EXPLICIT_DRY_RUN=0
 VERBOSE=0
 FINDINGS=0
 CRITICAL=0

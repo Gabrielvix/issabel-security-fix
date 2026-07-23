@@ -7,6 +7,32 @@ APACHE_UPLOAD_DROPIN="/etc/httpd/conf.d/issabel-upload-security.conf"
 APACHE_BASELINE_DROPIN="/etc/httpd/conf.d/issabel-security-baseline.conf"
 APACHE_NOWELCOME_DROPIN="/etc/httpd/conf.d/zz-issabel-security-no-welcome.conf"
 PHP_SECURITY_INI="/etc/php.d/99-issabel-security-fix.ini"
+WEB_LOCK_CONF="${FIX_ROOT}/conf/web-lock.conf"
+
+web_lock_enabled() {
+  # Padrão = ligado (máxima contenção). Só desliga com ENABLED=0 explícito.
+  [[ -f "$WEB_LOCK_CONF" ]] || return 0
+  if grep -qE '^[[:space:]]*ENABLED[[:space:]]*=[[:space:]]*0[[:space:]]*$' "$WEB_LOCK_CONF"; then
+    return 1
+  fi
+  return 0
+}
+
+set_web_lock_enabled() {
+  local want="${1:-1}"
+  mkdir -p "$(dirname "$WEB_LOCK_CONF")"
+  if [[ ! -f "$WEB_LOCK_CONF" ]]; then
+    cat >"$WEB_LOCK_CONF" <<EOF
+# Bloqueio web por IP (Apache) — Issabel Security Fix
+ENABLED=${want}
+EOF
+  elif grep -qE '^[[:space:]]*ENABLED[[:space:]]*=' "$WEB_LOCK_CONF"; then
+    sed -i "s/^[[:space:]]*ENABLED[[:space:]]*=.*/ENABLED=${want}/" "$WEB_LOCK_CONF"
+  else
+    echo "ENABLED=${want}" >>"$WEB_LOCK_CONF"
+  fi
+  log OK "web-lock.conf ENABLED=${want}"
+}
 
 # Diretórios onde PHP NÃO deve executar (uploads/cache/tmp)
 DENY_PHP_DIRS=(
@@ -30,23 +56,30 @@ generate_admin_htaccess_v2() {
   local ip
   {
     echo "# Gerado por issabel-security-fix ${FIX_VERSION} em $(date -Iseconds)"
-    if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
+    if ! web_lock_enabled; then
+      echo "# WEB-LOCK DESATIVADO — sem restrição por IP (pedido do cliente / --disable-web-lock)"
+    elif declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
       echo "# Breakglass: whitelist explícita (sem auto-RFC1918) + fail2ban + SSH + extra-allow"
     else
       echo "# Fonte: whitelist Issabel (iptables.db) + fail2ban ignoreip + SSH atual + extra-allow-ips.txt"
     fi
     echo "# Atualize com: issabel-security-fix.sh --harden"
     echo
-    echo "# 1) Restrição por IP (Apache 2.4)"
-    echo "<IfModule mod_authz_core.c>"
-    echo "  <RequireAny>"
-    while read -r ip; do
-      [[ -n "$ip" ]] || continue
-      echo "    Require ip $ip"
-    done < <(harden_collect_ips)
-    echo "  </RequireAny>"
-    echo "</IfModule>"
-    echo
+    if web_lock_enabled; then
+      echo "# 1) Restrição por IP (Apache 2.4)"
+      echo "<IfModule mod_authz_core.c>"
+      echo "  <RequireAny>"
+      while read -r ip; do
+        [[ -n "$ip" ]] || continue
+        echo "    Require ip $ip"
+      done < <(harden_collect_ips)
+      echo "  </RequireAny>"
+      echo "</IfModule>"
+      echo
+    else
+      echo "# 1) Restrição por IP: DESLIGADA"
+      echo
+    fi
     echo "# 2) Restrição de arquivos (padrão Issabel, sintaxe 2.4)"
     echo "<FilesMatch \"\\..*\$\">"
     echo "    Require all denied"
@@ -95,28 +128,36 @@ generate_apache_dropin() {
   fi
   {
     echo "# Gerado por issabel-security-fix ${FIX_VERSION}"
-    if [[ $bg -eq 1 ]]; then
+    if ! web_lock_enabled; then
+      echo "# WEB-LOCK DESATIVADO (--disable-web-lock): interface web aberta (sem Require ip)"
+      echo
+      echo "<Directory \"${WEBROOT}/admin\">"
+      echo "    AllowOverride All"
+      echo "    Require all granted"
+      echo "</Directory>"
+      echo
+      echo "<FilesMatch \"^(index|configs|config\\.all|rest|issabel_warning_authentication)\\.php\$\">"
+      echo "    Require all granted"
+      echo "</FilesMatch>"
+      echo
+      echo "<LocationMatch \"^/\$\">"
+      echo "    Require all granted"
+      echo "</LocationMatch>"
+    elif [[ $bg -eq 1 ]]; then
       echo "# MODO BREAKGLASS OTP: index.php aberto (login+OTP); demais endpoints = whitelist explícita"
       echo "# (sem auto-RFC1918). Após OTP o IP entra na whitelist por TTL_HOURS."
-    else
-      echo "# Restringe /admin E a UI Issabel (index.php = firewall/whitelist/fail2ban/etc)"
-      echo "# Sempre liberado: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, localhost"
-      echo "# + whitelist Issabel + fail2ban ignoreip + conf/extra-allow-ips.txt"
-    fi
-    echo
-    echo "<Directory \"${WEBROOT}/admin\">"
-    echo "    AllowOverride All"
-    echo "    AuthMerging And"
-    echo "    <RequireAny>"
-    while read -r ip; do
-      [[ -n "$ip" ]] || continue
-      echo "      Require ip $ip"
-    done < <(harden_collect_ips)
-    echo "    </RequireAny>"
-    echo "</Directory>"
-    echo
-    if [[ $bg -eq 1 ]]; then
-      # Login acessível de qualquer IP; OTP no PHP decide
+      echo
+      echo "<Directory \"${WEBROOT}/admin\">"
+      echo "    AllowOverride All"
+      echo "    AuthMerging And"
+      echo "    <RequireAny>"
+      while read -r ip; do
+        [[ -n "$ip" ]] || continue
+        echo "      Require ip $ip"
+      done < <(harden_collect_ips)
+      echo "    </RequireAny>"
+      echo "</Directory>"
+      echo
       echo "<Files \"index.php\">"
       echo "    Require all granted"
       echo "</Files>"
@@ -135,6 +176,21 @@ generate_apache_dropin() {
       echo "    Require all granted"
       echo "</LocationMatch>"
     else
+      echo "# Restringe /admin E a UI Issabel (index.php = firewall/whitelist/fail2ban/etc)"
+      echo "# Sempre liberado: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, localhost"
+      echo "# + whitelist Issabel + fail2ban ignoreip + conf/extra-allow-ips.txt"
+      echo
+      echo "<Directory \"${WEBROOT}/admin\">"
+      echo "    AllowOverride All"
+      echo "    AuthMerging And"
+      echo "    <RequireAny>"
+      while read -r ip; do
+        [[ -n "$ip" ]] || continue
+        echo "      Require ip $ip"
+      done < <(harden_collect_ips)
+      echo "    </RequireAny>"
+      echo "</Directory>"
+      echo
       echo "# Interface Issabel (index.php?menu=sec_whitelist, sec_rules, sec_fb_*, ...)"
       echo "<FilesMatch \"^(index|configs|config\\.all|rest|issabel_warning_authentication)\\.php\$\">"
       echo "    <RequireAny>"
@@ -332,6 +388,30 @@ EOF
 # Sync rápido só da allowlist Apache (add/remove whitelist Issabel).
 # Usado por bin/isf-sync-apache via sudo (asterisk → root).
 sync_apache_ip_restrict() {
+  if ! web_lock_enabled; then
+    log INFO "Web-lock desativado — sync Apache só garante acesso aberto (sem Require ip)"
+    if [[ $DRY_RUN -eq 1 ]]; then
+      return 0
+    fi
+    local tmp_ht tmp_ap
+    tmp_ht="$(mktemp)"
+    tmp_ap="$(mktemp)"
+    generate_admin_htaccess_v2 "$tmp_ht"
+    generate_apache_dropin "$tmp_ap"
+    backup_file "$HTACCESS_ADMIN"
+    backup_file "$APACHE_CONF_DROPIN"
+    install -o asterisk -g asterisk -m 0644 "$tmp_ht" "$HTACCESS_ADMIN"
+    install -o root -g root -m 0644 "$tmp_ap" "$APACHE_CONF_DROPIN"
+    rm -f "$tmp_ht" "$tmp_ap"
+    if apachectl configtest >/dev/null 2>&1; then
+      systemctl reload httpd >/dev/null 2>&1 || service httpd reload >/dev/null 2>&1 || true
+      log OK "Apache aberto (web-lock off) e recarregado"
+      return 0
+    fi
+    log ERROR "apachectl configtest FALHOU após sync web-lock off"
+    return 1
+  fi
+
   log INFO "Sincronizando restrição Apache a partir da whitelist Issabel..."
   local count
   count="$(harden_collect_ips | wc -l)"
@@ -434,16 +514,20 @@ EOF
 
 
 install_cli_symlinks() {
-  log INFO "Instalando CLIs isf-allow-ip / isf-deny-ip / isf-sync-apache..."
+  log INFO "Instalando CLIs isf-allow-ip / isf-deny-ip / isf-sync-apache / web-lock..."
   if [[ $DRY_RUN -eq 1 ]]; then
     log INFO "[dry-run] ln -sfn bin/isf-* /usr/local/sbin/"
     return 0
   fi
-  chmod +x "${FIX_ROOT}/bin/isf-allow-ip" "${FIX_ROOT}/bin/isf-deny-ip" "${FIX_ROOT}/bin/isf-sync-apache" 2>/dev/null || true
+  chmod +x "${FIX_ROOT}/bin/isf-allow-ip" "${FIX_ROOT}/bin/isf-deny-ip" \
+    "${FIX_ROOT}/bin/isf-sync-apache" \
+    "${FIX_ROOT}/bin/isf-disable-web-lock" "${FIX_ROOT}/bin/isf-enable-web-lock" 2>/dev/null || true
   ln -sfn "${FIX_ROOT}/bin/isf-allow-ip" /usr/local/sbin/isf-allow-ip
   ln -sfn "${FIX_ROOT}/bin/isf-deny-ip" /usr/local/sbin/isf-deny-ip
   ln -sfn "${FIX_ROOT}/bin/isf-sync-apache" /usr/local/sbin/isf-sync-apache
-  log OK "CLIs: isf-allow-ip, isf-deny-ip, isf-sync-apache"
+  ln -sfn "${FIX_ROOT}/bin/isf-disable-web-lock" /usr/local/sbin/isf-disable-web-lock
+  ln -sfn "${FIX_ROOT}/bin/isf-enable-web-lock" /usr/local/sbin/isf-enable-web-lock
+  log OK "CLIs: isf-allow-ip, isf-deny-ip, isf-sync-apache, isf-disable-web-lock, isf-enable-web-lock"
 }
 
 install_sync_apache_sudoers() {
@@ -500,16 +584,20 @@ install_whitelist_apache_hook() {
 
 run_harden() {
   log INFO "=== HARDENING (dry-run=$DRY_RUN) ==="
-  print_whitelist
-  local count
-  count="$(harden_collect_ips | wc -l)"
-  local min_ips=2
-  if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
-    min_ips=1
-  fi
-  if [[ "$count" -lt "$min_ips" ]]; then
-    log ERROR "Whitelist resultante muito pequena ($count). Abortando harden para evitar lockout total."
-    return 1
+  if web_lock_enabled; then
+    print_whitelist
+    local count
+    count="$(harden_collect_ips | wc -l)"
+    local min_ips=2
+    if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
+      min_ips=1
+    fi
+    if [[ "$count" -lt "$min_ips" ]]; then
+      log ERROR "Whitelist resultante muito pequena ($count). Abortando harden para evitar lockout total."
+      return 1
+    fi
+  else
+    log WARN "WEB-LOCK DESATIVADO — Apache sem bloqueio por IP (conf/web-lock.conf ENABLED=0)"
   fi
   harden_admin_htaccess
   harden_apache_conf
@@ -527,12 +615,16 @@ run_harden() {
     run_breakglass_install
   fi
   log OK "=== HARDENING concluído ==="
-  log WARN "Teste o acesso ao /admin a partir de um IP liberado antes de sair da sessão SSH."
+  if web_lock_enabled; then
+    log WARN "Teste o acesso ao /admin a partir de um IP liberado antes de sair da sessão SSH."
+    log INFO "Whitelist Issabel: add/remove no painel sincroniza Apache na hora (isf-sync-apache via sudo)."
+  else
+    log WARN "Web aberta na internet. Reative com: --enable-web-lock"
+  fi
   log INFO "Nota: exec/system NÃO foram desabilitados no PHP global (Issabel depende disso). Contenção = engine off em uploads + IP no /admin."
-  log INFO "Whitelist Issabel: add/remove no painel sincroniza Apache na hora (isf-sync-apache via sudo)."
   if declare -F breakglass_enabled >/dev/null 2>&1 && breakglass_enabled; then
     log WARN "Break-glass OTP ATIVO: index.php público para login; /admin bloqueado por whitelist; OTP fora da lista explícita; IP liberado por $(breakglass_ttl_hours)h após OTP. Remover IP da whitelist revoga sessão ativa na hora."
   else
-    log INFO "Break-glass OTP desativado — Apache bloqueia index.php e /admin por whitelist (máxima contenção)."
+    log INFO "Break-glass OTP desativado."
   fi
 }

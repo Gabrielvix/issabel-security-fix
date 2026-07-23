@@ -53,6 +53,8 @@ Uso:
   $0 --enroll-totp <user>   Gera TOTP (terminal) para usuário Issabel
   $0 --enable-breakglass    Marca ENABLED=1 (usar com --harden --apply)
   $0 --disable-breakglass   Marca ENABLED=0 e restaura bloqueio Apache total
+  $0 --disable-web-lock     Desativa bloqueio Apache por IP (web aberta)
+  $0 --enable-web-lock      Reativa bloqueio Apache por IP (padrão)
   $0 --fix-time [--dry-run|--apply]
                             Ajusta timezone (opcional) + chrony/NTP (crítico para OTP)
   $0 --verify               Valida limpeza (engine, persistência, upload PHP)
@@ -67,6 +69,8 @@ Flags:
   -v            Verbose
   --enable-breakglass / --disable-breakglass
                 Opt-in do OTP break-glass (padrão = DESLIGADO = Apache fecha tudo)
+  --disable-web-lock / --enable-web-lock
+                Desliga/liga o bloqueio Apache por IP (padrão = LIGADO)
 
 Arquivos de configuração:
   conf/c2-blocklist.txt       IPs C2 para bloquear
@@ -76,6 +80,7 @@ Arquivos de configuração:
   conf/extra-allow-ips.txt    IPs extras liberados na UI
   conf/breakglass.conf        OTP opcional (ENABLED=0 por padrão)
   conf/time.conf              Timezone opcional + pools NTP (OTP)
+  conf/web-lock.conf          Bloqueio Apache por IP (ENABLED=1 por padrão)
 
 Camadas de mitigação (padrão):
   1) Apache: só IPs da whitelist acessam index.php, /admin, configs.php
@@ -112,6 +117,7 @@ DO_DENY_IP=""
 DO_EXPIRE_BG=0
 DO_ENROLL_USER=""
 DO_BG_ENABLE=""
+DO_WEB_LOCK=""
 ALLOW_NOTE=""
 MODE_SET=0
 
@@ -131,6 +137,8 @@ parse_args() {
       --expire-breakglass) DO_EXPIRE_BG=1; MODE_SET=1; shift ;;
       --enable-breakglass) DO_BG_ENABLE=1; MODE_SET=1; shift ;;
       --disable-breakglass) DO_BG_ENABLE=0; MODE_SET=1; shift ;;
+      --enable-web-lock) DO_WEB_LOCK=1; MODE_SET=1; shift ;;
+      --disable-web-lock) DO_WEB_LOCK=0; MODE_SET=1; shift ;;
       --enroll-totp)
         MODE_SET=1
         shift
@@ -155,7 +163,7 @@ parse_args() {
         DO_DENY_IP="${1:-}"
         shift || true
         ;;
-      --dry-run) DRY_RUN=1; APPLY=0; shift ;;
+      --dry-run) DRY_RUN=1; APPLY=0; EXPLICIT_DRY_RUN=1; shift ;;
       --apply) DRY_RUN=0; APPLY=1; shift ;;
       -v|--verbose) VERBOSE=1; shift ;;
       -h|--help) usage; exit 0 ;;
@@ -175,13 +183,33 @@ main() {
   if [[ -n "$DO_BG_ENABLE" ]]; then
     set_breakglass_enabled "$DO_BG_ENABLE"
     # Se só passou --enable/--disable sem harden, aplica harden automaticamente com --apply
-    if [[ $DO_HARDEN -eq 0 && $DO_FIX -eq 0 && $DO_SCAN -eq 0 && $DO_VERIFY -eq 0 && $DO_EXPIRE_BG -eq 0 && -z "$DO_ENROLL_USER" ]]; then
+    if [[ $DO_HARDEN -eq 0 && $DO_FIX -eq 0 && $DO_SCAN -eq 0 && $DO_VERIFY -eq 0 && $DO_EXPIRE_BG -eq 0 && -z "$DO_ENROLL_USER" && -z "$DO_WEB_LOCK" ]]; then
       DO_HARDEN=1
-      if [[ $APPLY -eq 0 && $DRY_RUN -eq 1 ]]; then
+      if [[ $EXPLICIT_DRY_RUN -eq 0 && $APPLY -eq 0 ]]; then
         # se veio só --enable-breakglass, aplica de verdade
         DRY_RUN=0
         APPLY=1
       fi
+    fi
+  fi
+
+  if [[ -n "$DO_WEB_LOCK" ]]; then
+    if [[ $DO_HARDEN -eq 0 && $DO_FIX -eq 0 && $DO_SCAN -eq 0 && $DO_VERIFY -eq 0 && $DO_EXPIRE_BG -eq 0 && -z "$DO_ENROLL_USER" ]]; then
+      DO_HARDEN=1
+      if [[ $EXPLICIT_DRY_RUN -eq 0 && $APPLY -eq 0 ]]; then
+        DRY_RUN=0
+        APPLY=1
+      fi
+    fi
+    if [[ $DRY_RUN -eq 0 ]]; then
+      set_web_lock_enabled "$DO_WEB_LOCK"
+    else
+      log INFO "[dry-run] marcaria web-lock ENABLED=$DO_WEB_LOCK"
+    fi
+    if [[ "$DO_WEB_LOCK" == "0" ]]; then
+      log WARN "Web-lock DESATIVADO: a interface Issabel fica acessível de qualquer IP."
+    else
+      log OK "Web-lock ATIVADO: Apache volta a restringir por whitelist."
     fi
   fi
 

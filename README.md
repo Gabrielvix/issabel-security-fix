@@ -26,7 +26,7 @@ Limpar só os PHP **não basta**. Este projeto corta C2, restaura o engine ofici
 
 | Camada | O que faz | Padrão |
 |--------|-----------|--------|
-| **1. Apache por IP** | Só IPs da whitelist Issabel (+ fail2ban ignoreip + extras) acessam `index.php`, `/admin`, `configs.php`, `rest.php` | **Sempre ligado** no `--harden` |
+| **1. Apache por IP** | Só IPs da whitelist Issabel acessam a UI (`--disable-web-lock` desliga) | **Sempre ligado** no `--harden` (desligável) |
 | **2. Redes locais** | Em modo clássico, libera RFC1918 + localhost (LAN) | Ligado (modo clássico) |
 | **3. PHP em uploads** | Engine off + deny em `cache/`, `images/`, `tmp/`, `_cache/`, etc. | Sempre |
 | **4. Fail2ban + firewall** | Reinicia fail2ban, remove `firewall.disable`, tenta `amportal firewall` | Sempre no `--fix` |
@@ -96,6 +96,23 @@ isf-deny-ip 203.0.113.50
 ./issabel-security-fix.sh --show-whitelist
 ```
 
+### Desativar bloqueio web por IP (cliente que não quer)
+
+Abre `index.php` / `/admin` para qualquer IP. **Menos seguro.** Demais proteções (malware, uploads, C2, fail2ban) continuam.
+
+```bash
+./issabel-security-fix.sh --disable-web-lock
+# ou
+isf-disable-web-lock
+
+# Reativar (recomendado):
+./issabel-security-fix.sh --enable-web-lock
+# ou
+isf-enable-web-lock
+```
+
+Estado em `conf/web-lock.conf` (`ENABLED=0|1`). O `--harden` respeita essa flag.
+
 ---
 
 ## Break-glass OTP (opcional)
@@ -151,6 +168,7 @@ conf/webshell-names.txt     # nomes de drop
 conf/webshell-paths.txt     # caminhos fixos da campanha
 conf/extra-allow-ips.txt    # IPs extras no Apache
 conf/breakglass.conf        # ENABLED=0|1, TTL_HOURS=10
+conf/web-lock.conf          # bloqueio Apache por IP (ENABLED=1 padrão)
 conf/time.conf              # timezone opcional + pools NTP (OTP)
 conf/uid0-keep.txt          # usuários UID 0 permitidos (além de root)
 conf/acl-remove-users.txt   # logins Issabel (acl.db) a remover (ex.: atmin)
