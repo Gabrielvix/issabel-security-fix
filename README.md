@@ -159,6 +159,19 @@ O plugin é instalado no `--harden` mesmo com OTP desligado, para você cadastra
 
 ---
 
+#TOTP depende do relógio do servidor. No CentOS/RHEL 8 (Issabel), use o chrony:
+
+## Ver o horário atual e se o NTP está ativo
+```bash
+timedatectl
+date
+```
+## Forçar sincronização imediata (corrige drift grande)
+```bash
+chronyc -a makestep
+systemctl enable --now chronyd
+chronyc -a makestep
+```
 ## Configuração
 
 ```text
